@@ -1,2 +1,2 @@
-# Mentorix
+# Smartattend
 A learning application
