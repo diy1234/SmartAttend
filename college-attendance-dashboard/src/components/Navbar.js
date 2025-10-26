@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FaBell } from "react-icons/fa";
 import UserContext from "../context/UserContext";
+import Logo from './Logo';
 
 const Navbar = () => {
   const [search, setSearch] = useState("");
@@ -108,7 +109,18 @@ const Navbar = () => {
   return (
     <nav className="flex items-center justify-between bg-white shadow-md px-6 py-3 sticky top-0 z-50">
       {/* Left: Logo */}
-      <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
+      <div
+        className="flex items-center gap-2 cursor-pointer"
+        onClick={() => {
+          // navigate to dashboard based on role
+          const role = user?.role || JSON.parse(localStorage.getItem('user'))?.role;
+          if (role === 'student') navigate('/student-dashboard');
+          else if (role === 'teacher') navigate('/teacher-dashboard');
+          else navigate('/admin-dashboard');
+        }}
+      >
+        {/* inline SVG logo component */}
+  <Logo className="w-14 h-14" />
         <h1 className="text-xl font-bold text-[#132E6B]">SMARTATTEND</h1>
       </div>
 
@@ -169,7 +181,13 @@ const Navbar = () => {
       </div>
 
       {/* Right: Notifications + Profile + Logout */}
-      <div className="flex items-center gap-4 relative">
+  <div className="flex items-center gap-4 relative">
+        {/* Quick links for teachers */}
+        {user?.role === 'teacher' && (
+          <div className="mr-3">
+            <Link to="/teacher-face" className="bg-green-600 text-white px-3 py-1 rounded-md text-sm hover:bg-green-700">Mark Attendance</Link>
+          </div>
+        )}
         <div className="relative">
           <FaBell
             size={18}
@@ -197,7 +215,7 @@ const Navbar = () => {
 
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Link to="/admin-profile" className="flex items-center">
+            <Link to={user?.role === 'student' ? '/student-profile' : user?.role === 'teacher' ? '/teacher-about' : '/admin-profile'} className="flex items-center">
               <img
                 src={
                   (user && user.photo) ||

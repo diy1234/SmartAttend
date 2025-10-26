@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
+import Logo from '../components/Logo';
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-
 
 const Login = ({ onLogin }) => {
   const [email, setEmail] = useState("");
@@ -10,13 +10,16 @@ const Login = ({ onLogin }) => {
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
+  // If there's a stored user with extra fields (like photo) we want to preserve them on login
   useEffect(() => {
     const stored = localStorage.getItem("user");
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
         if (parsed.email) setEmail(parsed.email);
-      } catch (e) {}
+      } catch (e) {
+        // ignore
+      }
     }
   }, []);
 
@@ -38,26 +41,34 @@ const Login = ({ onLogin }) => {
   }
 
   try {
-    const res = await fetch("/api/auth/login", {  // Remove the full URL
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+    const response = await fetch('http://127.0.0.1:5000/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: email,
+        password: password,
+        role: role
+      }),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Login failed");
-
-    localStorage.setItem("user", JSON.stringify(data.user));
-    onLogin(data.user);
-
-    if (data.user.role === "admin") navigate("/admin-dashboard");
-    else if (data.user.role === "teacher") navigate("/teacher-dashboard");
-    else navigate("/student-dashboard");
-  } catch (err) {
-    setError(err.message);
+    const data = await response.json();
+    
+    if (response.ok) {
+      localStorage.setItem('user', JSON.stringify(data.user));
+      onLogin(data.user);
+      
+      if (data.user.role === "admin") navigate("/admin-dashboard");
+      else if (data.user.role === "teacher") navigate("/teacher-dashboard");
+      else navigate("/student-dashboard");
+    } else {
+      setError(data.error);
+    }
+  } catch (error) {
+    setError('Network error. Please try again.');
   }
 };
-
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-blue-200 to-blue-300">
@@ -67,15 +78,21 @@ const Login = ({ onLogin }) => {
         transition={{ duration: 0.6 }}
         className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md"
       >
-        <h1 className="text-4xl font-extrabold text-center text-[#132E6B] mb-2 tracking-wide">
-          SmartAttend
-        </h1>
+        {/* Website Name */}
+        <div className="flex items-center justify-center gap-3 mb-2">
+            <a href="/" className="inline-flex items-center">
+            <Logo className="w-16 h-16" />
+          </a>
+          <h1 className="text-4xl font-extrabold text-center text-[#132E6B] tracking-wide">SmartAttend</h1>
+        </div>
         <p className="text-center text-gray-500 mb-8">Smart Attendance System</p>
 
+        {/* Title */}
         <h2 className="text-2xl font-bold text-center text-[#132E6B] mb-6">
           Welcome Back 👋
         </h2>
 
+        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-gray-700 font-medium mb-1">Login as</label>
@@ -94,7 +111,6 @@ const Login = ({ onLogin }) => {
               </label>
             </div>
           </div>
-
           <div>
             <label className="block text-gray-700 font-medium mb-1">
               Email
@@ -139,6 +155,7 @@ const Login = ({ onLogin }) => {
           </button>
         </form>
 
+        {/* Links */}
         <div className="text-center mt-4">
           <Link
             to="/forgot-password"

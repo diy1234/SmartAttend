@@ -17,21 +17,27 @@ import SubjectDetails from "./pages/SubjectDetails";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import TeacherDashboard from "./pages/TeacherDashboard";
+import TeacherAboutMe from "./pages/TeacherAboutMe";
 import StudentDashboard from "./pages/StudentDashboard";
 import StudentReport from "./pages/StudentReport";
+import StudentAttendance from "./pages/StudentAttendance";
+import AttendanceHistory from "./pages/AttendanceHistory";
+import StudentProfile from "./pages/StudentProfile";
+import StudentAboutMe from "./pages/StudentAboutMe";
 import AttendanceRequests from "./pages/AttendanceRequests";
 import TakeAttendance from "./pages/TakeAttendance";
 import TeacherApplyLeave from "./pages/TeacherApplyLeave";
+import TeacherFacialAttendance from './pages/TeacherFacialAttendance';
+import MyRequests from './pages/MyRequests';
+import ManageDepartments from './pages/ManageDepartments';
 import UserContext from "./context/UserContext";
 import { DataProvider } from "./context/DataContext";
 import { ToastProvider } from './context/ToastContext';
 import ToastContainer from './components/ToastContainer';
-// In your App.js or routing file
-import ResetPassword from './pages/ResetPassword';
-
 
 // Protected route
 function ProtectedRoute({ children, allowedRoles }) {
@@ -66,6 +72,8 @@ function App() {
   const handleLogin = (userData) => {
     const existing = JSON.parse(localStorage.getItem("user")) || {};
     const merged = { ...existing, ...userData };
+    // ensure joinedAt is set for new signups
+    if (!merged.joinedAt) merged.joinedAt = Date.now();
     localStorage.setItem("user", JSON.stringify(merged));
     setUser(merged);
   };
@@ -86,17 +94,26 @@ function App() {
             <Navbar onLogout={handleLogout} />
             <div className="flex flex-1">
               <Sidebar />
-              <main className="flex-1 p-6">
+              <main className="flex-1 p-6 ml-64">
                 <Routes>
                   <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
                   <Route path="/teacher-dashboard" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherDashboard /></ProtectedRoute>} />
+                  <Route path="/teacher-about" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherAboutMe /></ProtectedRoute>} />
                   <Route path="/student-dashboard" element={<ProtectedRoute allowedRoles={["student"]}><StudentDashboard /></ProtectedRoute>} />
-                  <Route path="/apply-leave" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherApplyLeave /></ProtectedRoute>} />
+                  <Route path="/student-attendance" element={<ProtectedRoute allowedRoles={["student"]}><StudentAttendance /></ProtectedRoute>} />
+                  <Route path="/attendance-history" element={<ProtectedRoute allowedRoles={["student"]}><AttendanceHistory /></ProtectedRoute>} />
+                  <Route path="/student-profile" element={<ProtectedRoute allowedRoles={["student"]}><StudentProfile /></ProtectedRoute>} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/student-about" element={<ProtectedRoute allowedRoles={["student"]}><StudentAboutMe /></ProtectedRoute>} />
+                  <Route path="/apply-leave" element={<ProtectedRoute allowedRoles={["teacher","student"]}><TeacherApplyLeave /></ProtectedRoute>} />
                   <Route path="/student-report" element={<ProtectedRoute><StudentReport /></ProtectedRoute>} />
                   <Route path="/attendance-requests" element={<ProtectedRoute><AttendanceRequests /></ProtectedRoute>} />
+                  <Route path="/manage-departments" element={<ProtectedRoute allowedRoles={["admin"]}><ManageDepartments /></ProtectedRoute>} />
+                  <Route path="/my-requests" element={<ProtectedRoute allowedRoles={["student"]}><MyRequests /></ProtectedRoute>} />
                   <Route path="/take-attendance" element={<ProtectedRoute><TakeAttendance /></ProtectedRoute>} />
+                  <Route path="/teacher-face" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherFacialAttendance /></ProtectedRoute>} />
                   <Route path="/admin-profile" element={<ProtectedRoute><AdminProfile /></ProtectedRoute>} />
                   <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
                   <Route path="/departments/:dept/:subject" element={<ProtectedRoute><SubjectDetails /></ProtectedRoute>} />

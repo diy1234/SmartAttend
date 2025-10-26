@@ -36,11 +36,12 @@ export default function TeacherApplyLeave(){
       toDate,
       reason,
       status: 'pending',
-      role: 'teacher',
+      role: user?.role || 'teacher',
+      requestType: 'attendance',
       daysRequested: days,
     };
     addLeaveRequest(req);
-    showToast('Leave request submitted', 'info', 2500);
+    showToast('Attendance request submitted', 'info', 2500);
     setFromDate(''); setToDate(''); setReason('');
   };
 
@@ -51,9 +52,9 @@ export default function TeacherApplyLeave(){
 
   return (
     <div className="p-6">
-      <h2 className="text-3xl font-bold text-[#132E6B] mb-6">Apply for Leave</h2>
+      <h2 className="text-3xl font-bold text-[#132E6B] mb-6">Attendance Request</h2>
       <div className="bg-white p-6 rounded-xl shadow-md mb-6">
-        <h3 className="text-xl font-semibold mb-3">Request Leave</h3>
+        <h3 className="text-xl font-semibold mb-3">Request Attendance</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <input type="date" value={fromDate} onChange={(e)=>setFromDate(e.target.value)} className="border p-2 rounded" />
           <input type="date" value={toDate} onChange={(e)=>setToDate(e.target.value)} className="border p-2 rounded" />
@@ -70,8 +71,8 @@ export default function TeacherApplyLeave(){
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow-md">
-        <h3 className="text-xl font-semibold mb-3">My Holiday Summary</h3>
-        <p className="mb-2">Total approved holiday days: <strong>{totalApproved}</strong></p>
+        <h3 className="text-xl font-semibold mb-3">My Requests Summary</h3>
+        <p className="mb-2">Total approved days (attendance requests approved): <strong>{totalApproved}</strong></p>
         <p className="text-sm text-gray-600">Note: Saturdays and Sundays are treated as holidays and excluded from requested days count.</p>
       </div>
     </div>

@@ -1,2 +1,0 @@
-# Smartattend
-A learning application

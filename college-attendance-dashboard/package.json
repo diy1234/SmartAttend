@@ -1,6 +1,5 @@
 {
   "name": "college-attendance-dashboard",
-   "proxy": "http://127.0.0.1:5000",
   "version": "1.0.0",
   "private": true,
   "dependencies": {
@@ -44,5 +43,4 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.14"
   }
-  
 }

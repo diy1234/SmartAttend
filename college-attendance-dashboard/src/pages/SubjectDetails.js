@@ -1,132 +1,219 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
+import { useParams, Link } from "react-router-dom";
+import DataContext from "../context/DataContext";
+import slugify from "../utils/slugify";
 import * as XLSX from "xlsx";
 
 export default function SubjectDetails() {
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [classes, setClasses] = useState([]);
+  const { dept: deptParam, subject: subjectParam } = useParams();
+  const { enrollments, removeEnrollment, attendances = [], updateAttendance } = useContext(DataContext);
+  const [students, setStudents] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [editing, setEditing] = useState(null);
 
-  // ✅ Generate 2 classes with 10 students each
-  const generateClasses = () => {
-    return ["Class A", "Class B"].map((className, cIndex) => ({
-      className,
-      students: Array.from({ length: 10 }, (_, i) => ({
-        rollNo: `${className.replace(" ", "")}-${i + 1}`,
-        name: `Student ${i + 1 + cIndex * 10}`,
-        present: Math.random() > 0.3,
-      })),
-    }));
-  };
-
-  // ✅ Load attendance for selected date (or generate new)
   useEffect(() => {
-    const savedData = JSON.parse(localStorage.getItem("attendanceRecords")) || {};
-    if (savedData[date]) {
-      setClasses(savedData[date]);
-    } else {
-      const newClasses = generateClasses();
-      setClasses(newClasses);
-    }
-  }, [date]);
+    // find enrollments that match the route params (compare slugified names)
+    const matched = (enrollments || []).filter((e) => {
+      try {
+        return slugify(e.dept) === deptParam && slugify(e.subject) === subjectParam;
+      } catch (err) {
+        return false;
+      }
+    });
 
-  // ✅ Save attendance to localStorage
-  const saveAttendance = () => {
-    const savedData = JSON.parse(localStorage.getItem("attendanceRecords")) || {};
-    savedData[date] = classes;
-    localStorage.setItem("attendanceRecords", JSON.stringify(savedData));
-    alert(`Attendance saved for ${date}`);
-  };
+    // map to a simple student list (email or identifier)
+    const mapped = matched.map((m, idx) => ({ id: idx, student: m.student, dept: m.dept, subject: m.subject }));
+    setStudents(mapped);
+  }, [enrollments, deptParam, subjectParam]);
 
-  // ✅ Toggle attendance
-  const handleAttendanceChange = (classIndex, studentIndex) => {
-    const updated = [...classes];
-    updated[classIndex].students[studentIndex].present =
-      !updated[classIndex].students[studentIndex].present;
-    setClasses(updated);
-  };
+  useEffect(() => {
+    // Aggregate attendances for this dept/subject. Support two storage shapes:
+    // 1) Aggregated records where a.students is an array (teacher submitted batch)
+    // 2) Per-student records where each attendance entry is one student (student check-ins)
+    const raw = (attendances || []).filter(a => {
+      try {
+        return slugify(a.dept || a.department || '') === deptParam && slugify(a.subject || a.course || '') === subjectParam;
+      } catch (err) {
+        return false;
+      }
+    });
 
-  // ✅ Export Excel for that date/class
-  const exportToExcel = (cls) => {
-    const data = cls.students.map((s) => ({
-      "Roll No": s.rollNo,
-      Name: s.name,
-      Attendance: s.present ? "Present" : "Absent",
-    }));
+    // Group per date+submittedBy: key = date|submittedBy
+    const groups = new Map();
+    raw.forEach((a) => {
+      const dateKey = a.date ? new Date(a.date).toISOString() : "";
+      const submittedBy = a.submittedBy || a.teacher || a.faculty || '';
+      const key = `${dateKey}||${submittedBy}`;
+
+      if (Array.isArray(a.students) && a.students.length > 0) {
+        // aggregated record: treat as its own group
+        groups.set(`${key}||agg||${a.id || Math.random()}`, {
+          id: a.id || Date.now() + Math.random(),
+          date: a.date,
+          dept: a.dept || a.department || deptParam,
+          subject: a.subject || a.course || subjectParam,
+          submittedBy,
+          facultyApproved: a.facultyApproved,
+          students: a.students.slice(),
+        });
+      } else {
+        // per-student entry: push into group
+        const existing = groups.get(key) || { id: Date.now() + Math.random(), date: a.date, dept: a.dept || a.department || deptParam, subject: a.subject || a.course || subjectParam, submittedBy, facultyApproved: a.facultyApproved, students: [] };
+        // map student info
+        const stud = a.student ? { student: a.student, name: a.name || a.student, status: a.status || (a.present ? 'Present' : 'Absent') } : (a.name ? { student: a.name, name: a.name, status: a.status || (a.present ? 'Present' : 'Absent') } : null);
+        if (stud) existing.students.push(stud);
+        groups.set(key, existing);
+      }
+    });
+
+    const result = Array.from(groups.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
+    setRecords(result);
+  }, [attendances, deptParam, subjectParam]);
+
+  const exportRecord = (rec) => {
+    const data = (rec.students || []).map(s => ({ Student: s.student || s.email || s.name || '', Status: s.status || s.present || s.attendance || 'Present' }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, cls.className);
-    XLSX.writeFile(wb, `${cls.className}_${date}_Attendance.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, `Attendance_${rec.id}`);
+    XLSX.writeFile(wb, `${(rec.dept||deptParam)}_${(rec.subject||subjectParam)}_${new Date(rec.date).toISOString().slice(0,10)}.xlsx`);
+  };
+
+  const openEditor = (rec) => {
+    // clone record for editing
+    setEditing(JSON.parse(JSON.stringify(rec)));
+  };
+
+  const saveEdit = () => {
+    if(!editing) return;
+    updateAttendance(editing.id, editing);
+    setEditing(null);
+    alert('Attendance updated');
   };
 
   return (
     <div className="p-6 min-h-screen bg-gray-50">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-        <h2 className="text-2xl font-bold text-[#132E6B]">
-          📅 Daily Attendance
-        </h2>
-
-        {/* ✅ Date Picker */}
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-[#132E6B] outline-none"
-        />
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-[#132E6B]">Attendance for {subjectParam.replace(/-/g, ' ')} ({deptParam.replace(/-/g, ' ')})</h2>
       </div>
 
-      {/* Classes */}
-      {classes.map((cls, classIndex) => (
-        <div
-          key={classIndex}
-          className="bg-white rounded-xl shadow p-4 mb-6 border border-gray-200"
-        >
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="text-lg font-semibold">{cls.className}</h3>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => exportToExcel(cls)}
-                className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-              >
-                Export Excel
-              </button>
-
-              <button
-                onClick={saveAttendance}
-                className="bg-[#132E6B] text-white px-3 py-1 rounded hover:bg-blue-900"
-              >
-                Save Attendance
-              </button>
-            </div>
-          </div>
-
+      <div className="bg-white rounded-xl shadow p-4 mb-6">
+        <h3 className="font-medium mb-2">Submitted Attendance Records</h3>
+        {records.length === 0 ? (
+          <p className="text-gray-600">No attendance records submitted by faculty for this subject.</p>
+        ) : (
           <table className="w-full border-collapse text-sm">
             <thead className="bg-gray-100">
               <tr>
-                <th className="p-2 border text-left">Roll No</th>
-                <th className="p-2 border text-left">Name</th>
-                <th className="p-2 border text-center">Attendance</th>
+                <th className="p-2 border text-left">Date</th>
+                <th className="p-2 border text-left">Submitted By</th>
+                <th className="p-2 border text-center">Students</th>
+                <th className="p-2 border text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {cls.students.map((s, studentIndex) => (
-                <tr key={studentIndex} className="hover:bg-gray-50">
-                  <td className="p-2 border">{s.rollNo}</td>
-                  <td className="p-2 border">{s.name}</td>
-                  <td className="p-2 border text-center">
-                    <input
-                      type="checkbox"
-                      checked={s.present}
-                      onChange={() =>
-                        handleAttendanceChange(classIndex, studentIndex)
-                      }
-                    />
+              {records.map((r) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="p-2 border">{new Date(r.date).toLocaleString()}</td>
+                  <td className="p-2 border">{(r.submittedBy || r.teacher || r.faculty) ? (
+                    <Link to={`/teachers?email=${encodeURIComponent(r.submittedBy || r.teacher || r.faculty)}`} className="text-blue-700 underline">
+                      {r.submittedBy || r.teacher || r.faculty}
+                    </Link>
+                  ) : '—'}</td>
+                  <td className="p-2 border text-center">{(r.students || []).length}</td>
+                  <td className="p-2 border text-right space-x-2">
+                    <button onClick={()=>openEditor(r)} className="px-2 py-1 bg-blue-800 text-white rounded">View / Edit</button>
+                    <button onClick={()=>exportRecord(r)} className="px-2 py-1 bg-green-600 text-white rounded">Export</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl shadow p-4">
+        <h3 className="font-medium mb-2">Enrolled Students</h3>
+        {students.length === 0 ? (
+          <p className="text-gray-600">No students are currently enrolled in this subject.</p>
+        ) : (
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="p-2 border text-left">#</th>
+                <th className="p-2 border text-left">Student</th>
+                <th className="p-2 border text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s, idx) => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="p-2 border">{idx + 1}</td>
+                  <td className="p-2 border">{s.student}</td>
+                  <td className="p-2 border text-right">
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Remove enrollment for ${s.student}?`)) {
+                          removeEnrollment(s.student, s.dept, s.subject);
+                        }
+                      }}
+                      className="text-red-600"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Editor modal */}
+      {editing && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-3xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold">Edit Attendance — {editing.course || `${editing.dept || ''} ${editing.subject || ''}`}</h3>
+              <div className="flex gap-2">
+                <button onClick={() => setEditing(null)} className="px-3 py-1 bg-gray-300 rounded">Close</button>
+                <button onClick={saveEdit} className="px-3 py-1 bg-green-600 text-white rounded">Save</button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm mb-1">Notes</label>
+                <textarea value={editing.notes || ''} onChange={e=>setEditing(s=>({...s, notes: e.target.value}))} className="w-full border p-2 rounded" rows={3} />
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-2">Students</h4>
+                <div className="max-h-64 overflow-y-auto border rounded p-2">
+                  {editing.students?.map((st, idx) => (
+                    <div key={idx} className="flex items-center justify-between gap-4 p-2 rounded hover:bg-gray-50">
+                      <div className="flex items-center gap-3">
+                        <div className="font-medium">{st.name || st.student || `Student ${st.id || idx+1}`}</div>
+                        <div className="text-sm text-gray-500">{st.id ? `ID: ${st.id}` : ''}</div>
+                      </div>
+                      <div>
+                        <select value={st.status || 'Present'} onChange={e=>{
+                          const next = { ...editing };
+                          next.students[idx] = { ...next.students[idx], status: e.target.value };
+                          setEditing(next);
+                        }} className="border p-1 rounded">
+                          <option value="Present">Present</option>
+                          <option value="Absent">Absent</option>
+                          <option value="Late">Late</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }

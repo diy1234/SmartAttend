@@ -9,6 +9,7 @@ export default function Settings() {
   const [profilePic, setProfilePic] = useState(
     "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
   );
+  const [uploadEndpoint, setUploadEndpoint] = useState(()=> localStorage.getItem('uploadEndpoint') || '');
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -117,6 +118,14 @@ export default function Settings() {
       >
         Save Changes
       </button>
+      <div className="mt-6">
+        <h3 className="text-lg font-medium text-gray-700 mb-2">Upload Endpoint (optional)</h3>
+        <input value={uploadEndpoint} onChange={(e)=>setUploadEndpoint(e.target.value)} placeholder="https://example.com/upload" className="w-full border p-2 rounded" />
+        <div className="mt-2 flex gap-2">
+          <button onClick={()=>{ localStorage.setItem('uploadEndpoint', uploadEndpoint); alert('Upload endpoint saved'); }} className="px-3 py-1 bg-blue-800 text-white rounded">Save Endpoint</button>
+          <button onClick={()=>{ setUploadEndpoint(''); localStorage.removeItem('uploadEndpoint'); }} className="px-3 py-1 bg-gray-200 rounded">Clear</button>
+        </div>
+      </div>
     </div>
   );
 }

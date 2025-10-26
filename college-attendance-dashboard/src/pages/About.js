@@ -1,10 +1,16 @@
 import React from "react";
+import Logo from '../components/Logo';
 
 const About = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-blue-50 flex items-center justify-center p-8">
       <div className="max-w-3xl bg-white p-10 rounded-2xl shadow-xl text-center">
-        <h1 className="text-3xl font-bold text-[#132E6B] mb-6">About SmartAttend</h1>
+        <div className="flex items-center justify-center gap-3 mb-6">
+          <a href="/" className="inline-flex items-center">
+            <Logo className="w-16 h-16" />
+          </a>
+          <h1 className="text-3xl font-bold text-[#132E6B]">About SmartAttend</h1>
+        </div>
         <p className="text-gray-600 text-lg leading-relaxed">
           SmartAttend is a modern web-based attendance management system designed
           for educational institutions. It helps administrators and teachers track

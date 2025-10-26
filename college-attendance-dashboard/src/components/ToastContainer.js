@@ -25,7 +25,8 @@ const toastBase = (type) => ({
   padding: '10px 14px',
   minWidth: 240,
   borderRadius: 8,
-  color: '#fff',
+  backgroundColor: '#ffffff',
+  color: '#000000',
   boxShadow: '0 6px 18px rgba(0,0,0,0.08)',
   transform: 'translateY(-6px)',
   animation: 'toastIn 280ms ease forwards',
@@ -45,8 +46,8 @@ export default function ToastContainer(){
       {toasts.map(t => (
         <div key={t.id} style={toastBase(t.type)}>
           <div style={{ fontSize: 18 }}>{ICONS[t.type] || ICONS.info}</div>
-          <div style={{ flex: 1 }}>{t.message}</div>
-          <button onClick={() => removeToast(t.id)} style={{ marginLeft: 8, background: 'transparent', color: 'white', border: 'none', cursor: 'pointer' }} aria-label="dismiss">✕</button>
+          <div style={{ flex: 1, color: '#000000' }}>{t.message}</div>
+          <button onClick={() => removeToast(t.id)} style={{ marginLeft: 8, background: 'transparent', color: '#666666', border: 'none', cursor: 'pointer' }} aria-label="dismiss">✕</button>
         </div>
       ))}
     </div>

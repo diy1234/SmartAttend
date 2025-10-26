@@ -1,0 +1,9 @@
+{
+  "name": "smartattend-upload-server",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.18.4",
+    "multer": "^1.4.5"
+  }
+}
