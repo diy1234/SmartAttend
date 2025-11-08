@@ -20,7 +20,7 @@ function TakeAttendance() {
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [locked, setLocked] = useState(false);
-  const [activeStudentId, setActiveStudentId] = useState(null);
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [cameraOn, setCameraOn] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -39,7 +39,8 @@ function TakeAttendance() {
     );
   };
 
-  const { addAttendance } = useContext(DataContext);
+  const { addAttendance, classes, enrollments } = useContext(DataContext);
+  const [classId, setClassId] = useState(null);
   const { showToast } = useContext(ToastContext);
 
   useEffect(() => {
@@ -51,6 +52,34 @@ function TakeAttendance() {
     };
   }, []);
 
+  // Try to populate students from enrollments (local) if available for this dept/subject
+  useEffect(() => {
+    const inferredDept = location.state?.dept || '';
+    const inferredSubject = location.state?.subject || (course && course.includes(' - ') ? course.split(' - ').slice(1).join(' - ').trim() : course);
+    try {
+      const matched = (enrollments || []).filter(e => ('' + (e.dept || '')).toLowerCase() === ('' + (inferredDept || '')).toLowerCase() && ('' + (e.subject || '')).toLowerCase() === ('' + (inferredSubject || '')).toLowerCase());
+      if (matched && matched.length) {
+        const mapped = matched.map((m, idx) => ({ id: m.id || m.student || idx + 1, name: m.name || m.student || m.email || m.student || `Student ${idx+1}`, status: 'Present' }));
+        setStudents(mapped);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [enrollments, location.state, course]);
+
+  // Try to resolve class id from backend classes list when available
+  useEffect(() => {
+    if (!classes || !classes.length) return;
+    const inferredSubject = location.state?.subject || (course && course.includes(' - ') ? course.split(' - ').slice(1).join(' - ').trim() : course);
+    const found = classes.find(c => {
+      try {
+        const name = (c.class_name || c.subject_code || '').toString().toLowerCase();
+        return name.includes((inferredSubject || '').toString().toLowerCase());
+      } catch (e) { return false; }
+    });
+    if (found) setClassId(found.id);
+  }, [classes, location.state, course]);
+
   const handleSubmit = () => {
     setLocked(true);
     // try to include dept/subject so admin pages can filter by subject
@@ -61,6 +90,7 @@ function TakeAttendance() {
       course,
       dept: inferredDept,
       subject: inferredSubject,
+      class_id: classId || null,
       date: new Date().toISOString(),
       notes,
       students,
@@ -72,20 +102,33 @@ function TakeAttendance() {
     navigate('/admin-dashboard');
   };
 
-  const startCamera = async (studentId) => {
+  const startCamera = async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return showToast('Camera not supported in this browser', 'error');
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // store stream and show modal; video element is mounted after cameraOn=true
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setActiveStudentId(studentId);
       setCameraOn(true);
     } catch (err) {
       showToast('Unable to access camera', 'error');
     }
   };
+
+  // When camera modal opens and stream exists, attach stream to video element and play
+  useEffect(() => {
+    if (cameraOn && streamRef.current && videoRef.current) {
+      try {
+        videoRef.current.srcObject = streamRef.current;
+        // some browsers require play() to be called after attaching srcObject
+        const p = videoRef.current.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {
+        // ignore play errors (autoplay policies) — user gesture should allow playback
+      }
+    }
+  }, [cameraOn]);
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -93,11 +136,11 @@ function TakeAttendance() {
       streamRef.current = null;
     }
     setCameraOn(false);
-    setActiveStudentId(null);
   };
 
   const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !canvasRef.current) return showToast('Camera not running', 'error');
+    if (!selectedStudentId) return showToast('Select a student first', 'error');
     const video = videoRef.current;
     const canvas = canvasRef.current;
     canvas.width = video.videoWidth;
@@ -105,8 +148,8 @@ function TakeAttendance() {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const data = canvas.toDataURL('image/png');
-    // attach image to student and mark present
-    setStudents((prev) => prev.map((s) => (s.id === activeStudentId ? { ...s, status: 'Present', capturedImage: data } : s)));
+    // attach image to selected student and mark present
+    setStudents((prev) => prev.map((s) => (s.id === selectedStudentId ? { ...s, status: 'Present', capturedImage: data } : s)));
     showToast('Captured and marked Present', 'info', 2000);
     stopCamera();
   };
@@ -131,7 +174,7 @@ function TakeAttendance() {
       </div>
 
       {/* Search Bar */}
-      <div className="mb-6 flex items-center gap-3">
+          <div className="mb-6 flex items-center gap-3">
         <input
           type="text"
           placeholder="Search student..."
@@ -139,7 +182,28 @@ function TakeAttendance() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 border border-gray-300 rounded-lg p-2 text-gray-700"
         />
-        <span className="text-sm text-gray-500">{filteredStudents.length} students</span>
+            <span className="text-sm text-gray-500">{filteredStudents.length} students</span>
+            <div className="ml-auto flex items-center gap-3">
+              <div className="text-sm text-gray-700">Selected: <strong>{students.find(s=>s.id===selectedStudentId)?.name || 'None'}</strong></div>
+              {!cameraOn ? (
+                <button
+                  onClick={startCamera}
+                  disabled={locked}
+                  className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-700 disabled:opacity-50"
+                >
+                  📷 Start
+                </button>
+              ) : (
+                <button onClick={stopCamera} className="px-3 py-1 rounded-lg bg-red-600 text-white">Stop</button>
+              )}
+              <button
+                onClick={capturePhoto}
+                disabled={!cameraOn || !selectedStudentId}
+                className="px-3 py-1 rounded-lg bg-green-600 text-white disabled:opacity-50"
+              >
+                Capture
+              </button>
+            </div>
       </div>
 
       {/* Student List */}
@@ -155,14 +219,14 @@ function TakeAttendance() {
           <tbody>
             {filteredStudents.map((student) => (
               <tr
-                key={student.id}
-                className={`border-b hover:bg-gray-100 transition ${
-                  student.status === 'Absent' ? 'bg-red-50' : ''
-                }`}
-              >
+                  key={student.id}
+                  className={`border-b hover:bg-gray-100 transition ${
+                    student.id === selectedStudentId ? 'bg-blue-50' : (student.status === 'Absent' ? 'bg-red-50' : '')
+                  }`}
+                >
                 <td className="p-2">{student.id}</td>
-                <td className="p-2 flex items-center gap-3">
-                  <div>{student.name}</div>
+                  <td className="p-2 flex items-center gap-3">
+                    <div onClick={() => setSelectedStudentId(student.id)} className={`cursor-pointer ${student.id === selectedStudentId ? 'font-semibold' : ''}`}>{student.name}</div>
                   {student.capturedImage && (
                     <img src={student.capturedImage} alt="thumb" className="w-10 h-10 object-cover rounded-full" />
                   )}
@@ -179,14 +243,6 @@ function TakeAttendance() {
                       } ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       {student.status}
-                    </button>
-                    <button
-                      onClick={() => startCamera(student.id)}
-                      disabled={locked}
-                      title="Open camera for this student"
-                      className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-700"
-                    >
-                      📷
                     </button>
                   </div>
                 </td>

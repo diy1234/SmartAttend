@@ -1,5 +1,5 @@
 import React, { useContext, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { LayoutDashboard, BookOpen } from "lucide-react";
 import UserContext from "../context/UserContext";
 import DataContext from '../context/DataContext';
@@ -13,12 +13,7 @@ const Sidebar = () => {
   const { leaveRequests, departments } = useContext(DataContext);
   const pendingCount = (leaveRequests || []).filter(r => r.status === 'pending').length;
 
-  const navigate = useNavigate();
-  const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo] = useState('');
-  const [filterDept, setFilterDept] = useState('');
-  const [filterSubject, setFilterSubject] = useState('');
+  
 
   // department list is available from DataContext when needed elsewhere
 
@@ -50,7 +45,7 @@ const Sidebar = () => {
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
-              <Link to="/apply-leave">Attendance Request</Link>
+              <Link to="/attendance-analytics">Attendance Analytics</Link>
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300 cursor-pointer" onClick={()=>{ setUser(null); localStorage.removeItem('user'); }}>
               <BookOpen size={18} />
@@ -60,43 +55,13 @@ const Sidebar = () => {
         ) : user?.role === 'admin' ? (
           <>
             {/* Admin: expose Attendance Requests and overview */}
-            <li className="flex flex-col">
-              <div className="flex items-center space-x-2 hover:text-blue-300 cursor-pointer" onClick={()=> setShowAttendanceFilters(s=>!s)}>
+              <li className="flex items-center space-x-2 hover:text-blue-300">
                 <BookOpen size={18} />
-                <span>Attendance Requests ({pendingCount})</span>
-              </div>
-              {showAttendanceFilters && (
-                <div className="mt-2 ml-6 p-2 bg-white text-black rounded shadow-sm">
-                  <div className="flex flex-col space-y-2">
-                    <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} className="border p-1 rounded" />
-                    <input type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} className="border p-1 rounded" />
-                    <select value={filterDept} onChange={e=>setFilterDept(e.target.value)} className="border p-1 rounded">
-                      <option value="">All Depts</option>
-                      {departments?.map(d=> <option key={d.name} value={d.name}>{d.name}</option>)}
-                    </select>
-                    <select value={filterSubject} onChange={e=>setFilterSubject(e.target.value)} className="border p-1 rounded">
-                      <option value="">All Subjects</option>
-                      {(departments.find(d=>d.name===filterDept)?.subjects || []).map(s=> <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <div className="flex gap-2">
-                      <button onClick={()=>{
-                        const qp = new URLSearchParams();
-                        if(filterFrom) qp.set('from', filterFrom);
-                        if(filterTo) qp.set('to', filterTo);
-                        if(filterDept) qp.set('dept', filterDept);
-                        if(filterSubject) qp.set('subject', filterSubject);
-                        navigate(`/attendance-requests?${qp.toString()}`);
-                        setShowAttendanceFilters(false);
-                      }} className="px-2 py-1 bg-blue-800 text-white rounded">Go</button>
-                      <button onClick={()=>{ setFilterFrom(''); setFilterTo(''); setFilterDept(''); setFilterSubject(''); }} className="px-2 py-1 bg-gray-200 rounded">Clear</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </li>
+                <Link to="/attendance-requests">Attendance Requests ({pendingCount})</Link>
+              </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
-              <Link to="/attendance-overview">Attendance Overview</Link>
+              <Link to="/attendance-history">Attendance History</Link>
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
@@ -125,11 +90,7 @@ const Sidebar = () => {
               <Link to="/my-requests">My Attendance Requests</Link>
             </li>
 
-            {/* Quick link to main student dashboard */}
-            <li className="flex items-center space-x-2 hover:text-blue-300 mt-4">
-              <BookOpen size={18} />
-              <Link to="/student-dashboard">Dashboard</Link>
-            </li>
+            {/* Quick link to main student dashboard removed (duplicate) */}
           </>
         )}
       </ul>

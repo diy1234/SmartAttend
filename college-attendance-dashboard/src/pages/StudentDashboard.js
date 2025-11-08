@@ -1,196 +1,384 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../services/api';
 
-import DataContext from '../context/DataContext';
-import ToastContext from '../context/ToastContext';
-import UserContext from '../context/UserContext';
+export default function StudentDashboard() {
+  const navigate = useNavigate();
+  
+  const [loading, setLoading] = useState(true);
+  const [studentProfile, setStudentProfile] = useState(null);
+  const [attendanceData, setAttendanceData] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  
+  // Form states for attendance request
+  const [requestForm, setRequestForm] = useState({
+    dept: '',
+    subject: '',
+    section: '',
+    fromDate: '',
+    toDate: '',
+    reason: ''
+  });
 
-export default function StudentDashboard(){
-  const [reason, setReason] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  // Fetch live data from backend
+  useEffect(() => {
+    const fetchLiveData = async () => {
+      try {
+        setLoading(true);
+        const currentUser = JSON.parse(localStorage.getItem('user')) || {};
+        const userId = currentUser.id || currentUser.user_id;
 
-  const { addLeaveRequest, departments, getEnrollmentsForStudent, attendances } = useContext(DataContext);
-  const { showToast } = useContext(ToastContext);
-  const { user } = useContext(UserContext);
+        if (!userId) {
+          console.error('No user ID found');
+          return;
+        }
 
-  const [dept, setDept] = useState(departments?.[0]?.name || '');
-  const [subject, setSubject] = useState(departments?.[0]?.subjects?.[0] || '');
+        // Fetch student profile
+        try {
+          const profileResponse = await api.get(`/users/profile?user_id=${userId}`);
+          setStudentProfile(profileResponse.data.profile);
+        } catch (profileError) {
+          console.error('Profile fetch error:', profileError);
+        }
 
-  useEffect(()=>{
-    if(!dept && departments?.length) setDept(departments[0].name);
-    const currentEmail = user?.email || JSON.parse(localStorage.getItem('user'))?.email;
-    const enrolls = getEnrollmentsForStudent(currentEmail) || [];
-    if(enrolls.length){
-      // if enrolled, restrict to enrolled subject for selected dept
-      const forDept = enrolls.filter(e=>e.dept === dept).map(e=>e.subject);
-      if(forDept.length) setSubject(prev=> forDept.includes(prev) ? prev : forDept[0]);
-      else {
-        const d = departments.find(d=>d.name === dept);
-        if(d && (!subject || !d.subjects.includes(subject))) setSubject(d?.subjects?.[0] || '');
+        // Fetch attendance data
+        try {
+          const attendanceResponse = await api.get(`/attendance?student_id=${userId}`);
+          setAttendanceData(attendanceResponse.data.attendances || []);
+        } catch (attendanceError) {
+          console.error('Attendance fetch error:', attendanceError);
+        }
+
+        // Fetch leave requests
+        try {
+          const leaveResponse = await api.get(`/attendance-requests?student_id=${userId}`);
+          setLeaveRequests(leaveResponse.data.requests || []);
+        } catch (leaveError) {
+          console.error('Leave requests fetch error:', leaveError);
+        }
+
+      } catch (error) {
+        console.error('Error fetching live data:', error);
+      } finally {
+        setLoading(false);
       }
-    } else {
-      const d = departments.find(d=>d.name === dept);
-      if(d && (!subject || !d.subjects.includes(subject))) setSubject(d?.subjects?.[0] || '');
+    };
+
+    fetchLiveData();
+  }, []);
+
+  // Calculate attendance summary
+  const attendanceSummary = attendanceData.reduce((acc, record) => {
+    const subjectName = record.subject || 'Unknown';
+    if (!acc[subjectName]) {
+      acc[subjectName] = { present: 0, total: 0 };
     }
-  }, [departments, dept, subject, getEnrollmentsForStudent, user]);
-
-  // derive enrollments and attendance summary for current student
-  const currentEmail = user?.email || JSON.parse(localStorage.getItem('user'))?.email;
-  const myEnrolls = getEnrollmentsForStudent(currentEmail) || [];
-
-  // attendance summary: { 'Dept / Subject': { present: n, total: m } }
-  const attendanceSummary = (attendances || []).filter(a => a.student === currentEmail).reduce((acc, r) => {
-    const key = (r.dept ? `${r.dept} / ` : '') + (r.subject || '—');
-    acc[key] = acc[key] || { present: 0, total: 0 };
-    acc[key].total += 1;
-    if (r.status === 'present' || r.status === 'checked-in' || r.status === 'on-time') acc[key].present += 1;
+    acc[subjectName].total += 1;
+    if (record.status === 'present' || record.status === 'Present') {
+      acc[subjectName].present += 1;
+    }
     return acc;
   }, {});
 
-  const submitRequest = () => {
-    if (!fromDate || !toDate || !reason) return showToast('Please fill all fields', 'error', 3000);
-    const user = JSON.parse(localStorage.getItem('user')) || { email: 'student@local' };
-    const req = {
-      id: Date.now(),
-      student: user.email,
-      dept,
-      subject,
-      fromDate,
-      toDate,
-      reason,
-      status: 'pending',
-      role: 'student',
-      requestType: 'attendance',
-    };
-    addLeaveRequest(req);
-    showToast('Attendance request submitted', 'info', 2500);
-    setReason(''); setFromDate(''); setToDate('');
+  const handleInputChange = (field, value) => {
+    setRequestForm(prev => ({ ...prev, [field]: value }));
   };
 
-  return (
-    <div className="p-6">
-      <h2 className="text-3xl font-bold text-[#132E6B] mb-6">Student Dashboard</h2>
+  const submitAttendanceRequest = async () => {
+    if (!requestForm.fromDate || !requestForm.toDate || !requestForm.reason) {
+      alert('Please fill all required fields');
+      return;
+    }
 
-      <div className="bg-white p-6 rounded-xl shadow-md mb-6 flex flex-col md:flex-row gap-6 items-start">
-        <div className="flex-shrink-0">
-          <img src={user?.photo || JSON.parse(localStorage.getItem('user'))?.photo || '/avatar-placeholder.png'} alt="avatar" className="w-28 h-28 rounded-full object-cover border" />
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('user')) || {};
+      const newRequest = {
+        student_id: currentUser.id || currentUser.user_id,
+        dept: requestForm.dept,
+        subject: requestForm.subject,
+        section: requestForm.section,
+        from_date: requestForm.fromDate,
+        to_date: requestForm.toDate,
+        reason: requestForm.reason,
+        status: 'pending'
+      };
+
+      const response = await api.post('/attendance-requests', newRequest);
+      
+      if (response.data.success) {
+        alert('Attendance request submitted successfully!');
+        // Refresh leave requests
+        const leaveResponse = await api.get(`/attendance-requests?student_id=${currentUser.id || currentUser.user_id}`);
+        setLeaveRequests(leaveResponse.data.requests || []);
+        
+        // Reset form
+        setRequestForm({
+          dept: '',
+          subject: '',
+          section: '',
+          fromDate: '',
+          toDate: '',
+          reason: ''
+        });
+      }
+    } catch (error) {
+      console.error('Error submitting request:', error);
+      alert('Error submitting request. Please try again.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading dashboard...</p>
         </div>
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold">{user?.name || JSON.parse(localStorage.getItem('user'))?.name || 'Student'}</h3>
-          <p className="text-gray-600">{user?.email || JSON.parse(localStorage.getItem('user'))?.email}</p>
-          {user?.joinedAt || JSON.parse(localStorage.getItem('user'))?.joinedAt ? (
-            <p className="text-sm text-gray-500 mt-2">Joined: {new Date(user?.joinedAt || JSON.parse(localStorage.getItem('user'))?.joinedAt).toLocaleDateString()}</p>
-          ) : null}
-          <div className="mt-4">
-            <h4 className="font-medium">Enrolled Subjects</h4>
-            {myEnrolls.length ? (
-              <ul className="list-disc ml-5 mt-2 text-sm text-gray-700">
-                {myEnrolls.map((e, idx) => <li key={idx}>{e.dept} — {e.subject}</li>)}
-              </ul>
-            ) : (
-              <p className="text-sm text-gray-500 mt-2">You are not enrolled in any subjects yet.</p>
-            )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-[#132E6B] mb-2">Student Dashboard</h1>
+        <div className="w-20 h-1 bg-blue-600 rounded"></div>
+      </div>
+
+      {/* Student Profile Card with Register Face Button */}
+      <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="flex items-center gap-6">
+            <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+              {(studentProfile?.name || 'S').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-800">
+                {studentProfile?.name || 'Student Name'}
+              </h2>
+              <p className="text-gray-600">{studentProfile?.email || 'No email'}</p>
+              <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-600">
+                {studentProfile?.enrollment_no && (
+                  <span><strong>Enrollment:</strong> {studentProfile.enrollment_no}</span>
+                )}
+                {studentProfile?.course && (
+                  <span><strong>Course:</strong> {studentProfile.course}</span>
+                )}
+                {studentProfile?.department && (
+                  <span><strong>Department:</strong> {studentProfile.department}</span>
+                )}
+              </div>
+            </div>
           </div>
+          
+          <button
+            onClick={() => navigate('/face-registration')}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors duration-200 w-full md:w-auto"
+          >
+            Register Face
+          </button>
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-md mb-6">
-        <h3 className="text-xl font-semibold mb-3">Attendance Summary</h3>
-        {Object.keys(attendanceSummary || {}).length === 0 ? (
-          <p className="text-gray-600">No attendance records yet.</p>
+      {/* Attendance Summary */}
+      <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+        <h3 className="text-xl font-semibold text-gray-800 mb-6">Attendance Summary</h3>
+        
+        {Object.keys(attendanceSummary).length === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-gray-400 text-6xl mb-4">📊</div>
+            <p className="text-gray-500 text-lg">No attendance records yet.</p>
+            <p className="text-gray-400 text-sm mt-2">Attendance records will appear here once marked.</p>
+          </div>
         ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="p-2 text-left">Subject</th>
-                <th className="p-2">Present</th>
-                <th className="p-2">Total</th>
-                <th className="p-2">%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(attendanceSummary).map(([k, v]) => (
-                <tr key={k} className="border-b">
-                  <td className="p-2">{k}</td>
-                  <td className="p-2 text-center">{v.present}</td>
-                  <td className="p-2 text-center">{v.total}</td>
-                  <td className="p-2 text-center">{Math.round((v.present / v.total) * 100) || 0}%</td>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="p-4 text-left font-semibold text-gray-700">Subject</th>
+                  <th className="p-4 text-center font-semibold text-gray-700">Present</th>
+                  <th className="p-4 text-center font-semibold text-gray-700">Total</th>
+                  <th className="p-4 text-center font-semibold text-gray-700">Percentage</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Object.entries(attendanceSummary).map(([subject, data]) => {
+                  const percentage = data.total > 0 ? Math.round((data.present / data.total) * 100) : 0;
+                  return (
+                    <tr key={subject} className="border-b hover:bg-gray-50">
+                      <td className="p-4 font-medium text-gray-800">{subject}</td>
+                      <td className="p-4 text-center text-green-600 font-semibold">
+                        {data.present}
+                      </td>
+                      <td className="p-4 text-center text-gray-700">{data.total}</td>
+                      <td className="p-4 text-center">
+                        <span className={`px-3 py-2 rounded-full text-sm font-semibold ${
+                          percentage >= 75 ? 'bg-green-100 text-green-800' :
+                          percentage >= 60 ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {percentage}%
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md mb-6">
-        <h3 className="text-xl font-semibold mb-3">Attendance Request</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <select value={dept} onChange={(e)=>setDept(e.target.value)} className="border p-2 rounded">
-            {(departments || []).map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
-          </select>
-          <select value={subject} onChange={(e)=>setSubject(e.target.value)} className="border p-2 rounded">
-            {
-              (() => {
-                const enrolls = getEnrollmentsForStudent(JSON.parse(localStorage.getItem('user'))?.email) || [];
-                const forDept = enrolls.filter(e => e.dept === dept).map(e=>e.subject);
-                if(forDept.length) return forDept.map(s => <option key={s} value={s}>{s}</option>);
-                return (departments.find(d=>d.name===dept)?.subjects || []).map(s => <option key={s} value={s}>{s}</option>);
-              })()
-            }
-          </select>
-          <input type="date" value={fromDate} onChange={(e)=>setFromDate(e.target.value)} className="border p-2 rounded" />
-          <input type="date" value={toDate} onChange={(e)=>setToDate(e.target.value)} className="border p-2 rounded" />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-          <select className="border p-2 rounded" onChange={(e)=>setReason(e.target.value)} value={reason}>
-            <option value="">Select reason</option>
-            <option value="sick">Sick</option>
-            <option value="personal">Personal</option>
-            <option value="other">Other</option>
-          </select>
-          <div className="flex justify-end items-center">
-            <button onClick={submitRequest} className="px-4 py-2 bg-blue-800 text-white rounded">Submit Request</button>
+
+      {/* Attendance Request */}
+      <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+        <h3 className="text-xl font-semibold text-gray-800 mb-6">Attendance Request</h3>
+        
+        <div className="space-y-6">
+          {/* Department, Subject, Section Row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+              <select 
+                value={requestForm.dept}
+                onChange={(e) => handleInputChange('dept', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select Department</option>
+                <option value="MCA">MCA</option>
+                <option value="MBA">MBA</option>
+                <option value="B.Tech">B.Tech</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
+              <select 
+                value={requestForm.subject}
+                onChange={(e) => handleInputChange('subject', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select Subject</option>
+                <option value="Artificial Intelligence">Artificial Intelligence</option>
+                <option value="Data Structures">Data Structures</option>
+                <option value="Web Development">Web Development</option>
+                <option value="Database Management">Database Management</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Section</label>
+              <select 
+                value={requestForm.section}
+                onChange={(e) => handleInputChange('section', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Section (optional)</option>
+                <option value="A">Section A</option>
+                <option value="B">Section B</option>
+                <option value="C">Section C</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Date Range Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
+              <input 
+                type="date" 
+                value={requestForm.fromDate}
+                onChange={(e) => handleInputChange('fromDate', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
+              <input 
+                type="date" 
+                value={requestForm.toDate}
+                onChange={(e) => handleInputChange('toDate', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          {/* Reason and Submit Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Reason</label>
+              <select 
+                value={requestForm.reason}
+                onChange={(e) => handleInputChange('reason', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select reason</option>
+                <option value="sick">Sick</option>
+                <option value="personal">Personal</option>
+                <option value="medical">Medical</option>
+                <option value="family">Family Emergency</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            
+            <div className="flex items-end">
+              <button 
+                onClick={submitAttendanceRequest}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg font-semibold transition-colors duration-200"
+              >
+                Submit Request
+              </button>
+            </div>
           </div>
         </div>
-        {/* Student-side face marking removed: teachers will manage face-based attendance */}
       </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-md">
-        <h3 className="text-xl font-semibold mb-3">My Requests</h3>
-        <RequestsList forStudent={true} currentStudent={currentEmail} />
+      {/* My Leave Requests */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h3 className="text-xl font-semibold text-gray-800 mb-6">My Leave Requests</h3>
+        
+        {leaveRequests.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-gray-400 text-6xl mb-4">📋</div>
+            <p className="text-gray-500 text-lg">No leave requests yet.</p>
+            <p className="text-gray-400 text-sm mt-2">Submit a request above to see it here.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="p-4 text-left font-semibold text-gray-700">Subject</th>
+                  <th className="p-4 text-left font-semibold text-gray-700">From</th>
+                  <th className="p-4 text-left font-semibold text-gray-700">To</th>
+                  <th className="p-4 text-left font-semibold text-gray-700">Reason</th>
+                  <th className="p-4 text-left font-semibold text-gray-700">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaveRequests.map(request => (
+                  <tr key={request.id} className="border-b hover:bg-gray-50">
+                    <td className="p-4 text-gray-800">{request.subject}</td>
+                    <td className="p-4 text-gray-700">{request.from_date}</td>
+                    <td className="p-4 text-gray-700">{request.to_date}</td>
+                    <td className="p-4 text-gray-700">{request.reason}</td>
+                    <td className="p-4">
+                      <span className={`px-3 py-2 rounded-full text-sm font-semibold ${
+                        request.status === 'approved' ? 'bg-green-100 text-green-800' :
+                        request.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                        'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {request.status?.charAt(0).toUpperCase() + request.status?.slice(1) || 'Pending'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-function RequestsList({ forStudent, currentStudent }){
-  const { leaveRequests } = useContext(DataContext);
-  const list = (leaveRequests || []).filter(r => !forStudent || (currentStudent ? r.student === currentStudent : true));
-  if(list.length === 0) return <p className="text-gray-600">No requests yet.</p>;
-  return (
-    <div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="p-2">Subject</th>
-            <th className="p-2">From</th>
-            <th className="p-2">To</th>
-            <th className="p-2">Reason</th>
-            <th className="p-2">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map(r => (
-            <tr key={r.id} className="border-b">
-              <td className="p-2">{(r.dept ? `${r.dept} / ` : '') + (r.subject || '—')}</td>
-              <td className="p-2">{r.fromDate}</td>
-              <td className="p-2">{r.toDate}</td>
-              <td className="p-2">{r.reason}</td>
-              <td className="p-2">{r.status}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-

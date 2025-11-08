@@ -1,298 +1,318 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import DataContext from "../context/DataContext";
-
-// This page supports two views:
-// - teacher/student: existing attendance leave-requests list (unchanged)
-// - admin: Attendance Requests admin UI with filters (date range, course, subject) and an editor
+import React, { useState, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
+import UserContext from "../context/UserContext";
+import ToastContext from "../context/ToastContext";
 
 function AttendanceRequests() {
   const navigate = useNavigate();
-  const { leaveRequests, getAssignmentsForTeacher, attendances, updateAttendance, departments } = React.useContext(DataContext);
-  const { updateLeaveRequest } = React.useContext(DataContext);
-  const user = JSON.parse(localStorage.getItem('user')) || {};
+  const { user } = useContext(UserContext);
+  const { showToast } = useContext(ToastContext);
 
-  // If admin, show admin UI for editing attendances approved by faculty
-  if (user.role === 'admin') {
-    return <AdminAttendanceRequests attendances={attendances} updateAttendance={updateAttendance} departments={departments} navigate={navigate} />;
-  }
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [teacherProfileId, setTeacherProfileId] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
 
-  // Non-admin behaviour (teacher/student): existing leaveRequests UI
-  let list = leaveRequests || [];
-  if (user.role === 'teacher'){
-    const assigns = (getAssignmentsForTeacher(user.email) || []).map(a => `${a.dept}||${a.subject}`);
-    list = list.filter(r => assigns.includes(`${r.dept}||${r.subject}`));
-  }
+  // Get teacher profile ID
+  useEffect(() => {
+    const getTeacherProfileId = async () => {
+      if (user?.role === 'teacher' && user?.id) {
+        try {
+          const response = await fetch(`http://127.0.0.1:5000/api/teachers/profile-by-user/${user.id}`);
+          
+          if (response.ok) {
+            const profileData = await response.json();
+            setTeacherProfileId(profileData.teacher_profile_id);
+          } else {
+            throw new Error('Could not get teacher profile');
+          }
+        } catch (error) {
+          console.error('Error fetching teacher profile:', error);
+          showToast('Failed to load teacher profile', 'error');
+        }
+      }
+    };
 
-  const handleAction = (id, action) => {
-    updateLeaveRequest(id, action === 'Approved' ? 'accepted' : 'rejected');
+    getTeacherProfileId();
+  }, [user, showToast]);
+
+  // Fetch all attendance requests for teacher
+  useEffect(() => {
+    const fetchTeacherRequests = async () => {
+      if (user?.role !== 'teacher' || !teacherProfileId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const response = await fetch(`http://127.0.0.1:5000/api/attendance-requests/teacher/${teacherProfileId}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        setRequests(data.requests || []);
+        
+      } catch (error) {
+        console.error('Error fetching attendance requests:', error);
+        showToast('Failed to load attendance requests', 'error');
+        setRequests([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTeacherRequests();
+  }, [user, teacherProfileId, showToast]);
+
+  // Handle approve action
+  const handleApprove = async (requestId) => {
+    setActionLoading(requestId);
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/attendance-requests/requests/${requestId}/approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // Update the request in the list
+      setRequests(prev => prev.map(req => 
+        req.id === requestId ? { ...req, status: 'approved', responded_at: new Date().toISOString() } : req
+      ));
+      
+      showToast(`✅ ${result.message}`, 'success');
+      
+    } catch (error) {
+      console.error(`Error approving request:`, error);
+      showToast(`Failed to approve request: ${error.message}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
   };
+
+  // Handle reject action
+  const handleReject = async (requestId) => {
+    setActionLoading(requestId);
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/attendance-requests/requests/${requestId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // Update the request in the list
+      setRequests(prev => prev.map(req => 
+        req.id === requestId ? { ...req, status: 'rejected', responded_at: new Date().toISOString() } : req
+      ));
+      
+      showToast(`❌ ${result.message}`, 'success');
+      
+    } catch (error) {
+      console.error(`Error rejecting request:`, error);
+      showToast(`Failed to reject request: ${error.message}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Filter requests by status
+  const pendingRequests = requests.filter(req => req.status === 'pending');
+  const processedRequests = requests.filter(req => req.status !== 'pending');
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading attendance requests...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
+      {/* Header */}
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-blue-900">Attendance Requests</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-blue-900">Student Attendance Requests</h1>
+          <p className="text-gray-600 mt-2">
+            {pendingRequests.length} pending, {processedRequests.length} processed
+          </p>
+        </div>
         <button
           onClick={() => navigate(-1)}
-          className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
+          className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition"
         >
-          ← Back
+          ← Back to Dashboard
         </button>
       </div>
 
-      <div className="bg-white shadow-md rounded-xl p-6">
-        {list.length === 0 ? (
-          <p className="text-gray-600">No pending requests 🎉</p>
-        ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-blue-800 text-white">
-                <th className="p-2">Student</th>
-                <th className="p-2">Subject</th>
-                <th className="p-2">From</th>
-                <th className="p-2">To</th>
-                <th className="p-2 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((r) => (
-                <tr key={r.id} className="border-b hover:bg-gray-100 transition">
-                  <td className="p-2">{r.student}</td>
-                  <td className="p-2">{(r.dept ? `${r.dept} / ` : '') + (r.subject || '—')}</td>
-                  <td className="p-2">{r.fromDate}</td>
-                  <td className="p-2">{r.toDate}</td>
-                  <td className="p-2 text-center space-x-3">
-                    <button
-                      onClick={() => handleAction(r.id, "Approved")}
-                      className="bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-500"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => handleAction(r.id, "Rejected")}
-                      className="bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-500"
-                    >
-                      Reject
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AdminAttendanceRequests({ attendances = [], updateAttendance, departments = [], navigate }){
-  // local filter state
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [dept, setDept] = useState('');
-  const [subject, setSubject] = useState('');
-  const [filtered, setFiltered] = useState([]);
-  const [editing, setEditing] = useState(null); // attendance record being edited
-
-  const location = useLocation();
-
-  // initialize filters from query params if provided
-  useEffect(() => {
-    const qp = new URLSearchParams(location.search);
-    const qFrom = qp.get('from') || '';
-    const qTo = qp.get('to') || '';
-    const qDept = qp.get('dept') || '';
-    const qSubject = qp.get('subject') || '';
-    if (qFrom) setFrom(qFrom);
-    if (qTo) setTo(qTo);
-    if (qDept) setDept(qDept);
-    if (qSubject) setSubject(qSubject);
-  }, [location.search]);
-
-  useEffect(() => {
-    // Build combined list: include aggregated records (records with students[])
-    // and also group per-student records (one entry per student) by dept+subject+date so admin can review them.
-    const all = attendances || [];
-    const aggregated = all.filter(a => Array.isArray(a.students));
-
-    // group single student records
-    const singles = all.filter(a => !Array.isArray(a.students));
-    const groups = {};
-    singles.forEach((s) => {
-      try {
-        const d = s.dept || s.department || '';
-        const su = s.subject || s.course || '';
-        const dateKey = new Date(s.date || s.createdAt || s.timestamp || Date.now()).toISOString().slice(0,10);
-        const key = `${d}___${su}___${dateKey}`;
-        if(!groups[key]) groups[key] = { dept: d, subject: su, date: dateKey, submittedBy: s.submittedBy || s.teacher || s.faculty || '', students: [], _composed: true };
-        groups[key].students.push({ id: s.id, student: s.student || s.email || s.name || '', name: s.name || '', status: s.status || (s.present ? 'Present' : 'Present') });
-      } catch (err) {
-        // ignore
-      }
-    });
-
-    const groupedRecords = Object.keys(groups).map(k => ({ id: `group-${k}`, ...groups[k] }));
-
-    let list = aggregated.concat(groupedRecords || []);
-
-    if(from) list = list.filter(a => new Date(a.date) >= new Date(from));
-    if(to) list = list.filter(a => new Date(a.date) <= new Date(to));
-    if(dept) list = list.filter(a => (a.dept || '').toLowerCase() === dept.toLowerCase());
-    if(subject) list = list.filter(a => (a.subject || '').toLowerCase() === subject.toLowerCase());
-
-    // show newest first
-    list.sort((a,b) => new Date(b.date) - new Date(a.date));
-    setFiltered(list.slice());
-  }, [attendances, from, to, dept, subject]);
-
-  const { removeAttendance } = React.useContext(DataContext);
-
-  const openEditor = (record) => {
-    // clone to avoid direct mutation
-    setEditing(JSON.parse(JSON.stringify(record)));
-  };
-
-  const saveEdit = () => {
-    if(!editing) return;
-    // if this is a composed/grouped record, update individual attendance entries
-    if(editing._composed) {
-      if(Array.isArray(editing.students)){
-        editing.students.forEach(st => {
-          if(st.id) updateAttendance(st.id, { status: st.status });
-        });
-      }
-      alert('Grouped attendance entries updated');
-    } else {
-      updateAttendance(editing.id, editing);
-      alert('Attendance updated by admin');
-    }
-    setEditing(null);
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-blue-900">Attendance Requests — Admin Review</h1>
-        <div>
-          <button onClick={() => navigate('/admin-dashboard')} className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-600">← Back</button>
-        </div>
-      </div>
-
-      <div className="bg-white shadow-md rounded-xl p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-sm mb-1">From</label>
-            <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="border p-2 rounded w-full" />
+      {/* Pending Requests Section */}
+      {pendingRequests.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-4">
+            <h2 className="text-2xl font-bold text-blue-800">Pending Requests</h2>
+            <span className="bg-red-500 text-white px-2 py-1 rounded-full text-sm">
+              {pendingRequests.length}
+            </span>
           </div>
-          <div>
-            <label className="block text-sm mb-1">To</label>
-            <input type="date" value={to} onChange={e=>setTo(e.target.value)} className="border p-2 rounded w-full" />
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Course/Dept</label>
-            <select value={dept} onChange={e=>setDept(e.target.value)} className="border p-2 rounded w-full">
-              <option value="">All</option>
-              {departments.map(d=> <option key={d.name} value={d.name}>{d.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Subject</label>
-            <select value={subject} onChange={e=>setSubject(e.target.value)} className="border p-2 rounded w-full">
-              <option value="">All</option>
-              {(departments.find(d=>d.name===dept)?.subjects || []).map(s=> <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white shadow-md rounded-xl p-6">
-        {filtered.length === 0 ? (
-          <p className="text-gray-600">No faculty-approved attendance records for the selected filters.</p>
-        ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="p-2">Course</th>
-                <th className="p-2">Date</th>
-                <th className="p-2">Submitted By</th>
-                <th className="p-2">Students</th>
-                <th className="p-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(r => (
-                <tr key={r.id} className="border-b hover:bg-gray-50">
-                  <td className="p-2">{r.course || `${r.dept || ''} ${r.subject || ''}`}</td>
-                  <td className="p-2">{new Date(r.date).toLocaleString()}</td>
-                  <td className="p-2">{r.submittedBy}</td>
-                  <td className="p-2">{r.students?.length || 0}</td>
-                  <td className="p-2 flex gap-2">
-                    <button onClick={() => openEditor(r)} className="px-2 py-1 bg-blue-800 text-white rounded">Edit</button>
-                    <button onClick={() => {
-                      if(window.confirm('Remove this attendance record? This cannot be undone.')){
-                        if(r._composed && Array.isArray(r.students)){
-                          // remove all underlying student attendance entries
-                          r.students.forEach(s => { if(s.id) removeAttendance(s.id); });
-                        } else {
-                          removeAttendance(r.id);
-                        }
-                        // update filtered immediately for responsiveness
-                        setFiltered(f => f.filter(x => x.id !== r.id));
-                        alert('Attendance record removed');
-                      }
-                    }} className="px-2 py-1 bg-red-600 text-white rounded">Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Editor Modal */}
-      {editing && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-3xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold">Edit Attendance — {editing.course || `${editing.dept || ''} ${editing.subject || ''}`}</h3>
-              <div className="flex gap-2">
-                <button onClick={() => setEditing(null)} className="px-3 py-1 bg-gray-300 rounded">Close</button>
-                <button onClick={saveEdit} className="px-3 py-1 bg-green-600 text-white rounded">Save</button>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm mb-1">Notes</label>
-                <textarea value={editing.notes || ''} onChange={e=>setEditing(s=>({...s, notes: e.target.value}))} className="w-full border p-2 rounded" rows={3} />
-              </div>
-
-              <div>
-                <h4 className="font-medium mb-2">Students</h4>
-                <div className="max-h-64 overflow-y-auto border rounded p-2">
-                  {editing.students?.map((st, idx) => (
-                    <div key={idx} className="flex items-center justify-between gap-4 p-2 rounded hover:bg-gray-50">
-                      <div className="flex items-center gap-3">
-                        <div className="font-medium">{st.name || st.student || `Student ${st.id || idx+1}`}</div>
-                        <div className="text-sm text-gray-500">{st.id ? `ID: ${st.id}` : ''}</div>
+          
+          <div className="grid gap-4">
+            {pendingRequests.map((request) => (
+              <div key={request.id} className="bg-white rounded-xl shadow-md border-l-4 border-yellow-500 p-6">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-4 mb-3">
+                      <h3 className="text-lg font-semibold text-gray-800">{request.student_name}</h3>
+                      <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                        PENDING
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-500">Enrollment:</span>
+                        <p className="font-medium">{request.enrollment_no}</p>
                       </div>
                       <div>
-                        <select value={st.status || 'Present'} onChange={e=>{
-                          const next = { ...editing };
-                          next.students[idx] = { ...next.students[idx], status: e.target.value };
-                          setEditing(next);
-                        }} className="border p-1 rounded">
-                          <option value="Present">Present</option>
-                          <option value="Absent">Absent</option>
-                          <option value="Late">Late</option>
-                        </select>
+                        <span className="text-gray-500">Subject:</span>
+                        <p className="font-medium">{request.subject}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Date:</span>
+                        <p className="font-medium">{new Date(request.request_date).toLocaleDateString()}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Department:</span>
+                        <p className="font-medium">{request.department}</p>
                       </div>
                     </div>
-                  ))}
+                    
+                    {request.reason && (
+                      <div className="mt-3">
+                        <span className="text-gray-500 text-sm">Reason:</span>
+                        <p className="text-gray-700 mt-1 bg-gray-50 p-3 rounded">{request.reason}</p>
+                      </div>
+                    )}
+                    
+                    <div className="text-xs text-gray-400 mt-2">
+                      Submitted: {new Date(request.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-2 ml-4">
+                    <button
+                      onClick={() => handleApprove(request.id)}
+                      disabled={actionLoading === request.id}
+                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-500 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {actionLoading === request.id ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          ✅ Approve
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleReject(request.id)}
+                      disabled={actionLoading === request.id}
+                      className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {actionLoading === request.id ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          ❌ Reject
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            ))}
           </div>
+        </div>
+      )}
+
+      {/* Processed Requests Section */}
+      {processedRequests.length > 0 && (
+        <div>
+          <h2 className="text-2xl font-bold text-blue-800 mb-4">Processed Requests</h2>
+          
+          <div className="bg-white rounded-xl shadow-md overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="p-3 text-left text-sm font-medium text-gray-500">Student</th>
+                  <th className="p-3 text-left text-sm font-medium text-gray-500">Subject</th>
+                  <th className="p-3 text-left text-sm font-medium text-gray-500">Date</th>
+                  <th className="p-3 text-left text-sm font-medium text-gray-500">Reason</th>
+                  <th className="p-3 text-left text-sm font-medium text-gray-500">Status</th>
+                  <th className="p-3 text-left text-sm font-medium text-gray-500">Processed</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {processedRequests.map((request) => (
+                  <tr key={request.id} className="hover:bg-gray-50">
+                    <td className="p-3">
+                      <div className="font-medium text-gray-900">{request.student_name}</div>
+                      <div className="text-sm text-gray-500">{request.enrollment_no}</div>
+                    </td>
+                    <td className="p-3 text-sm">{request.subject}</td>
+                    <td className="p-3 text-sm">{new Date(request.request_date).toLocaleDateString()}</td>
+                    <td className="p-3 text-sm text-gray-600">{request.reason || 'No reason provided'}</td>
+                    <td className="p-3">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        request.status === 'approved' 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {request.status.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="p-3 text-sm text-gray-500">
+                      {request.responded_at ? new Date(request.responded_at).toLocaleString() : 'N/A'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {requests.length === 0 && (
+        <div className="text-center py-12">
+          <div className="text-6xl mb-4">📝</div>
+          <h3 className="text-xl font-semibold text-gray-600 mb-2">No Attendance Requests</h3>
+          <p className="text-gray-500 mb-6">Students haven't submitted any attendance requests yet.</p>
         </div>
       )}
     </div>

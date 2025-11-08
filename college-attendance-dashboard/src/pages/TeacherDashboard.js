@@ -1,26 +1,175 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import DataContext from '../context/DataContext';
 import UserContext from '../context/UserContext';
+import ToastContext from '../context/ToastContext';
 import slugify from '../utils/slugify';
+import AttendanceAnalytics from './AttendanceAnalytics';
 
-// (profile helper removed - profile managed in `TeacherAboutMe` / My Profile)
 function TeacherDashboard(){
   const navigate = useNavigate();
   const { departments, leaveRequests, updateLeaveRequest, getAssignmentsForTeacher, getWeeklyScheduleForTeacher } = useContext(DataContext);
   const { user } = useContext(UserContext);
+  const { showToast } = useContext(ToastContext);
 
   const [selectedDept, setSelectedDept] = useState(() => localStorage.getItem('selectedDept') || (departments[0]?.name || ''));
-  const subjects = departments.find(d => d.name === selectedDept)?.subjects || [];
-  const [selectedSubject, setSelectedSubject] = useState(() => localStorage.getItem('selectedSubject') || (subjects[0] || ''));
+  const [courses, setCourses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ course_count: 0, student_count: 0, pending_requests: 0 });
+  const [weeklySchedule, setWeeklySchedule] = useState([]);
 
-  useEffect(()=>{
+  // Camera refs/state for quick Mark (Camera) flow
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const [cameraOnQuick, setCameraOnQuick] = useState(false);
+
+  // Fetch teacher courses, stats, and weekly schedule from backend
+  useEffect(() => {
+    const fetchTeacherData = async () => {
+      try {
+        setLoading(true);
+        const teacherId = user?.id || JSON.parse(localStorage.getItem('user'))?.id;
+        
+        if (!teacherId) {
+          showToast('Teacher ID not found', 'error');
+          return;
+        }
+
+        // Fetch courses
+        const coursesResponse = await fetch(`http://127.0.0.1:5000/api/teacher-dashboard/my-courses?teacher_id=${teacherId}`);
+        
+        if (!coursesResponse.ok) {
+          throw new Error(`HTTP error! status: ${coursesResponse.status}`);
+        }
+        
+        const coursesData = await coursesResponse.json();
+        setCourses(coursesData.courses || []);
+        
+        // Fetch stats
+        const statsResponse = await fetch(`http://127.0.0.1:5000/api/teacher-dashboard/stats?teacher_id=${teacherId}`);
+        if (statsResponse.ok) {
+          const statsData = await statsResponse.json();
+          setStats(statsData);
+        }
+        
+        // Fetch weekly schedule
+        const scheduleResponse = await fetch(`http://127.0.0.1:5000/api/teacher-dashboard/weekly-schedule?teacher_id=${teacherId}`);
+        if (scheduleResponse.ok) {
+          const scheduleData = await scheduleResponse.json();
+          setWeeklySchedule(scheduleData.schedule || []);
+        }
+        
+      } catch (error) {
+        console.error('Error fetching teacher data:', error);
+        showToast('Failed to load dashboard data', 'error');
+        setCourses([]);
+        setWeeklySchedule([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (user) {
+      fetchTeacherData();
+    }
+  }, [user, showToast]);
+
+  // Fetch students for a specific course
+  const fetchCourseStudents = async (classId) => {
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/teacher-dashboard/course-students/${classId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data.students || [];
+      
+    } catch (error) {
+      console.error('Error fetching course students:', error);
+      showToast('Failed to load students', 'error');
+      return [];
+    }
+  };
+
+  // Handle view students - show in modal or navigate to subject details
+  const handleViewStudents = async (course) => {
+    try {
+      showToast('Loading students...', 'info');
+      const students = await fetchCourseStudents(course.schedule_id);
+      
+      // Navigate to subject details page with the students data
+      navigate(`/departments/${slugify(course.department)}/${slugify(course.subject)}`, { 
+        state: { 
+          course: `${course.department} - ${course.subject}`,
+          students: students,
+          courseInfo: course
+        } 
+      });
+      
+    } catch (error) {
+      console.error('Error loading students:', error);
+      showToast('Failed to load students', 'error');
+    }
+  };
+
+  // Handle mark attendance - navigate to take-attendance page
+  const handleMarkAttendance = (course) => {
+    navigate('/take-attendance', { 
+      state: { 
+        course: `${course.department} - ${course.subject}`,
+        dept: course.department,
+        subject: course.subject,
+        scheduleId: course.schedule_id
+      } 
+    });
+  };
+
+  // Camera setup effect
+  useEffect(() => {
+    if (cameraOnQuick && streamRef.current && videoRef.current) {
+      try {
+        videoRef.current.srcObject = streamRef.current;
+        const p = videoRef.current.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {
+        // ignore autoplay errors
+      }
+    }
+  }, [cameraOnQuick]);
+
+  const handleQuickCapture = () => {
+    if (!videoRef.current || !canvasRef.current) return showToast('Camera not ready', 'error');
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 320;
+    canvas.height = video.videoHeight || 240;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const data = canvas.toDataURL('image/png');
+    
+    // stop camera
+    const tracks = streamRef.current?.getTracks() || [];
+    tracks.forEach(t => t.stop());
+    streamRef.current = null;
+    setCameraOnQuick(false);
+    
+    // Navigate to take-attendance with captured image
+    navigate('/take-attendance', { 
+      state: { 
+        image: data, 
+        course: `${selectedDept}`, 
+        dept: selectedDept 
+      } 
+    });
+  };
+
+  useEffect(() => {
     localStorage.setItem('selectedDept', selectedDept);
   }, [selectedDept]);
-  useEffect(()=>{
-    localStorage.setItem('selectedSubject', selectedSubject);
-  }, [selectedSubject]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
@@ -31,135 +180,161 @@ function TeacherDashboard(){
       {/* Overview Cards */}
       <div className="grid md:grid-cols-3 gap-6 mb-6">
         <div className="bg-white shadow-md rounded-xl p-5">
-          <h2 className="font-semibold text-gray-700">Next Class Scheduled</h2>
-          <p className="mt-1 text-blue-900 font-medium">{selectedDept} — {selectedSubject}</p>
-          <p className="text-sm text-gray-500">10:00 AM - 11:00 AM | Room 204</p>
-          <div className="mt-3 flex gap-3 items-center">
-            <select value={selectedDept} onChange={(e)=>{ setSelectedDept(e.target.value); setSelectedSubject(''); }} className="border p-2 rounded">
-              {departments.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
-            </select>
-            <select value={selectedSubject} onChange={(e)=>setSelectedSubject(e.target.value)} className="border p-2 rounded">
-              {subjects.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <button
-              onClick={() => navigate(`/take-attendance`, { state: { course: `${selectedDept} - ${selectedSubject}`, dept: slugify(selectedDept), subject: slugify(selectedSubject) } })}
-              disabled={!selectedDept || !selectedSubject}
-              className="bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          <h2 className="font-semibold text-gray-700">My Courses</h2>
+          <p className="mt-1 text-blue-900 font-medium">
+            {loading ? 'Loading...' : `${stats.course_count || courses.length} Courses Assigned`}
+          </p>
+          <p className="text-sm text-gray-500">Total courses you're teaching</p>
+          
+          <div className="mt-3">
+            <select 
+              value={selectedDept} 
+              onChange={(e) => setSelectedDept(e.target.value)} 
+              className="w-full border p-2 rounded"
             >
-              Mark Attendance
-            </button>
+              <option value="">All Departments</option>
+              {departments.map(d => (
+                <option key={d.name} value={d.name}>{d.name}</option>
+              ))}
+            </select>
           </div>
         </div>
-
-        
 
         <div className="bg-white shadow-md rounded-xl p-5 text-center">
           <h2 className="font-semibold text-gray-700">Pending Attendance Requests</h2>
-          {(() => {
-            // filter leaveRequests for student-submitted requests relevant to this teacher
-            let list = (leaveRequests || []).filter(r => r.role !== 'teacher');
-            if(user?.role === 'teacher'){
-              const assigns = (getAssignmentsForTeacher(user.email) || []).map(a => `${a.dept}||${a.subject}`);
-              list = list.filter(r => assigns.includes(`${r.dept}||${r.subject}`));
-            }
-            const pending = list.filter(r => r.status === 'pending');
-            return (
-              <>
-                <p className="text-3xl text-red-600 font-bold mt-2">{pending.length || 0}</p>
-                <p className="text-gray-500 text-sm">Awaiting approval</p>
-                <div className="mt-3 space-y-2">
-                  {pending.slice(0,3).map(r => (
-                    <div key={r.id} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                      <div className="text-left text-sm">
-                        <div className="font-medium">{r.student}</div>
-                        <div className="text-xs text-gray-500">{r.dept} / {r.subject}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => updateLeaveRequest(r.id, 'accepted')} className="px-2 py-1 bg-green-600 text-white rounded text-sm">Approve</button>
-                        <button onClick={() => updateLeaveRequest(r.id, 'rejected')} className="px-2 py-1 bg-red-600 text-white rounded text-sm">Reject</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={() => navigate("/attendance-requests")}
-                  className="mt-3 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                >
-                  Review Requests
-                </button>
-              </>
-            );
-          })()}
+          <p className="text-3xl text-red-600 font-bold mt-2">{stats.pending_requests || 0}</p>
+          <p className="text-gray-500 text-sm">Awaiting approval</p>
+          <button
+            onClick={() => navigate("/attendance-requests")}
+            className="mt-3 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            Review Requests
+          </button>
         </div>
+
         <div className="bg-white shadow-md rounded-xl p-5 text-center">
-          <h2 className="font-semibold text-gray-700">Attendance Overview</h2>
-          <p className="text-gray-500 text-sm mt-2">Quick access to attendance summaries and percentages</p>
-          <button onClick={() => navigate('/attendance-overview')} className="mt-3 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Open Overview</button>
+          <h2 className="font-semibold text-gray-700">Total Students</h2>
+          <p className="text-3xl font-bold mt-2 text-blue-600">
+            {stats.student_count || courses.reduce((total, course) => total + (course.student_count || 0), 0)}
+          </p>
+          <p className="text-gray-500 text-sm">Across all courses</p>
         </div>
       </div>
 
-      {/* Weekly Schedule (driven by admin-managed schedule) */}
+      {/* My Courses Table */}
+      <div className="bg-white shadow-md rounded-xl p-5 mb-6">
+        <h2 className="text-lg font-bold text-blue-900 mb-3">📘 My Courses</h2>
+        
+        {loading ? (
+          <div className="text-center py-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-800 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Loading courses...</p>
+          </div>
+        ) : courses.length === 0 ? (
+          <p className="text-gray-600 text-center py-4">No courses assigned yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-blue-800 text-white text-left">
+                  <th className="p-3 rounded-l-lg">Subject</th>
+                  <th className="p-3">Department</th>
+                  <th className="p-3">Schedule</th>
+                  <th className="p-3 text-center">Room</th>
+                  <th className="p-3 text-center">Students</th>
+                  <th className="p-3 text-center rounded-r-lg">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {courses
+                  .filter(course => !selectedDept || course.department === selectedDept)
+                  .map((course) => (
+                    <tr key={course.schedule_id} className="border-b hover:bg-gray-50">
+                      <td className="p-3 font-medium">{course.subject}</td>
+                      <td className="p-3">{course.department}</td>
+                      <td className="p-3">{course.schedule}</td>
+                      <td className="p-3 text-center">{course.room}</td>
+                      <td className="p-3 text-center">{course.student_count}</td>
+                      <td className="p-3 text-center">
+                        <div className="flex gap-2 justify-center">
+                          <button
+                            onClick={() => handleViewStudents(course)}
+                            className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 text-sm"
+                          >
+                            View Students
+                          </button>
+                          <button
+                            onClick={() => handleMarkAttendance(course)}
+                            className="bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 text-sm"
+                          >
+                            Mark Attendance
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Weekly Schedule */}
       <div className="bg-white shadow-md rounded-xl p-5 mb-6">
         <h2 className="text-lg font-bold text-blue-900 mb-3">📅 Weekly Schedule</h2>
-        {(() => {
-          const teacherEmail = user?.email;
-          const schedule = teacherEmail ? (getWeeklyScheduleForTeacher(teacherEmail) || []) : [];
-          if(!schedule || schedule.length === 0) return <p className="text-gray-600">No weekly schedule assigned. Contact admin.</p>;
-          return (
-            <ul className="space-y-2 text-gray-700">
-              {schedule.map((s) => (<li key={s.id}>{s.day}: {s.dept} - {s.subject} — {s.time}</li>))}
-            </ul>
-          );
-        })()}
+        {weeklySchedule.length === 0 ? (
+          <p className="text-gray-600">No weekly schedule assigned. Contact admin.</p>
+        ) : (
+          <ul className="space-y-2 text-gray-700">
+            {weeklySchedule.map((s) => {
+              const parts = (s.time || '').split('-').map(p => p.trim());
+              const start = parts[0] || '-';
+              const end = parts[1] || '-';
+              return (
+                <li key={s.id}>
+                  {s.day}: {s.dept} - {s.subject} — <span className="font-medium">{start}</span> to <span className="font-medium">{end}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6 mb-6">
-        <div className="md:col-span-2 bg-white shadow-md rounded-xl p-5">
-          <h2 className="text-lg font-bold text-blue-900 mb-3">📘 My Courses</h2>
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-blue-800 text-white text-left">
-                <th className="p-2 rounded-l-lg">Subject</th>
-                <th className="p-2 text-center">Department</th>
-                <th className="p-2 text-center rounded-r-lg">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {departments.flatMap(d => (d.subjects || []).map(s => ({ dept: d.name, subject: s }))).map((item, idx) => (
-                <tr key={`${item.dept}-${item.subject}-${idx}`} className={`border-b transition ${item.dept === selectedDept && item.subject === selectedSubject ? 'bg-blue-50' : 'hover:bg-gray-100'}`}>
-                  <td className="p-2">{item.subject}</td>
-                  <td className="p-2 text-center">{item.dept}</td>
-                  <td className="p-2 text-center">
-                    <div className="flex gap-2 justify-center">
-                      <button
-                        onClick={() => navigate(`/departments/${slugify(item.dept)}/${slugify(item.subject)}`, { state: { course: `${item.dept} - ${item.subject}` } })}
-                        className="bg-blue-800 text-white px-4 py-1 rounded-lg hover:bg-blue-700"
-                      >
-                        View Students
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Attendance Analytics */}
+      <div className="bg-white shadow-md rounded-xl p-5 mb-6">
+        <h2 className="text-lg font-bold text-blue-900 mb-3">📊 Attendance Analytics</h2>
+        <AttendanceAnalytics />
+      </div>
 
-          
-        </div>
-
-        {/* Right column: quick facial attendance */}
-        <aside className="bg-white shadow-md rounded-xl p-5">
-          <h2 className="text-lg font-bold text-blue-900 mb-3">� Facial Attendance</h2>
-          <p className="text-sm text-gray-600 mb-3">Open the camera to capture student face snapshots and record attendance.</p>
-          <div className="flex flex-col gap-2">
-            <button onClick={() => navigate('/teacher-face', { state: { dept: selectedDept, subject: selectedSubject } })} className="bg-green-600 text-white px-4 py-2 rounded">Open Camera</button>
-            <button onClick={() => navigate('/take-attendance', { state: { course: `${selectedDept} - ${selectedSubject}`, dept: slugify(selectedDept), subject: slugify(selectedSubject) } })} className="bg-blue-800 text-white px-4 py-2 rounded">Mark Attendance (Manual)</button>
+      {/* Quick Camera Modal */}
+      {cameraOnQuick && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-4 w-full max-w-2xl">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-semibold">Quick Capture — {selectedDept}</h3>
+              <div className="flex items-center gap-2">
+                <button onClick={handleQuickCapture} className="px-3 py-1 bg-green-600 text-white rounded">Capture</button>
+                <button onClick={() => {
+                  const tracks = streamRef.current?.getTracks() || [];
+                  tracks.forEach(t => t.stop());
+                  streamRef.current = null;
+                  setCameraOnQuick(false);
+                }} className="px-3 py-1 bg-red-600 text-white rounded">Close</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-gray-100 p-2 rounded">
+                <video ref={videoRef} autoPlay muted playsInline className="w-full h-64 object-cover rounded" />
+              </div>
+              <div className="bg-gray-50 p-2 rounded flex items-center justify-center">
+                <canvas ref={canvasRef} style={{ maxWidth: '100%', borderRadius: 8 }} />
+              </div>
+            </div>
           </div>
-        </aside>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default TeacherDashboard;
-

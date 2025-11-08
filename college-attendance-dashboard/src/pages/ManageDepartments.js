@@ -12,7 +12,8 @@ export default function ManageDepartments(){
   const [newAssignment, setNewAssignment] = useState({ teacher: '', dept: '', subject: ''});
   const [newEnrollment, setNewEnrollment] = useState({ student: '', dept: '', subject: ''});
   const [newScheduleDay, setNewScheduleDay] = useState('');
-  const [newScheduleTime, setNewScheduleTime] = useState('');
+  const [newScheduleStart, setNewScheduleStart] = useState('');
+  const [newScheduleEnd, setNewScheduleEnd] = useState('');
 
   // confirm modal state
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -67,21 +68,43 @@ export default function ManageDepartments(){
       return alert('This teacher already has the maximum number of subjects for ' + newScheduleDay + '. Remove one before adding.');
     }
     // pick chosen slot if provided, otherwise first available
-    const usedTimes = new Set(entriesForTeacherDay.map(e => e.time));
+    const usedEntries = entriesForTeacherDay || [];
+    const toMinutes = (t) => {
+      if(!t) return null;
+      const [h,m] = t.split(':');
+      return parseInt(h,10)*60 + parseInt(m,10);
+    };
+
+    // if admin provided start/end explicitly, use them (validate)
     let timeStr = '';
-    if(newScheduleTime){
-      // admin picked a slot: verify it's a valid TIME_SLOTS entry and not already used
-      if(usedTimes.has(newScheduleTime)) return alert('Selected time slot is already used for this teacher on this day');
-      const valid = TIME_SLOTS.find(ts => `${ts.start} - ${ts.end}` === newScheduleTime);
-      if(!valid) return alert('Selected time slot is invalid');
-      timeStr = newScheduleTime;
+    if(newScheduleStart || newScheduleEnd){
+      if(!newScheduleStart || !newScheduleEnd) return alert('Please provide both start and end times or leave both empty to auto-select');
+      if(newScheduleStart >= newScheduleEnd) return alert('Start time must be before end time');
+      const startMin = toMinutes(newScheduleStart);
+      const endMin = toMinutes(newScheduleEnd);
+      // check overlap with existing entries for this teacher/day
+      for(const e of usedEntries){
+        const parts = (e.time || '').split('-').map(p => p.trim());
+        if(parts.length !== 2) continue;
+        const es = toMinutes(parts[0]);
+        const ee = toMinutes(parts[1]);
+        if(es == null || ee == null) continue;
+        // overlap if start < ee && es < end
+        if(startMin < ee && es < endMin){
+          return alert('Provided time overlaps an existing slot for this teacher on that day: ' + e.time);
+        }
+      }
+      timeStr = `${newScheduleStart} - ${newScheduleEnd}`;
     } else {
+      // auto-pick first available slot from TIME_SLOTS
+      const usedTimes = new Set(usedEntries.map(e => e.time));
       const slotIdx = TIME_SLOTS.findIndex(ts => !usedTimes.has(`${ts.start} - ${ts.end}`));
       if(slotIdx === -1) return alert('No available time slot');
       timeStr = `${TIME_SLOTS[slotIdx].start} - ${TIME_SLOTS[slotIdx].end}`;
     }
+
     addWeeklyEntry({ teacher: newAssignment.teacher, dept: newAssignment.dept, subject: newAssignment.subject, day: newScheduleDay, time: timeStr });
-    setNewScheduleDay(''); setNewAssignment({ teacher: '', dept: '', subject: '' }); setNewScheduleTime('');
+    setNewScheduleDay(''); setNewAssignment({ teacher: '', dept: '', subject: '' }); setNewScheduleStart(''); setNewScheduleEnd('');
   };
 
   return (
@@ -99,27 +122,53 @@ export default function ManageDepartments(){
       {/* Weekly Schedule Management */}
       <div className="bg-white p-6 rounded-xl shadow-md mb-6">
         <h3 className="text-xl font-semibold mb-4">Weekly Schedule Management (max 5 subjects/day per teacher)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
-          <input placeholder="Teacher email" value={newAssignment.teacher} onChange={(e)=>setNewAssignment(s=>({...s, teacher: e.target.value}))} className="border p-2 rounded" />
-          <select value={newAssignment.dept} onChange={(e)=>setNewAssignment(s=>({...s, dept: e.target.value}))} className="border p-2 rounded">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 mb-3 items-center">
+          <input
+            placeholder="Teacher email"
+            value={newAssignment.teacher}
+            onChange={(e)=>setNewAssignment(s=>({...s, teacher: e.target.value}))}
+            className="border p-2 rounded w-full md:col-span-2"
+          />
+
+          <select
+            value={newAssignment.dept}
+            onChange={(e)=>setNewAssignment(s=>({...s, dept: e.target.value}))}
+            className="border p-2 rounded w-full"
+          >
             <option value="">Select dept</option>
             {departments.map(d=> <option key={d.name} value={d.name}>{d.name}</option>)}
           </select>
-          <select value={newAssignment.subject} onChange={(e)=>setNewAssignment(s=>({...s, subject: e.target.value}))} className="border p-2 rounded">
+
+          <select
+            value={newAssignment.subject}
+            onChange={(e)=>setNewAssignment(s=>({...s, subject: e.target.value}))}
+            className="border p-2 rounded w-full"
+          >
             <option value="">Select subject</option>
             {(departments.find(d=>d.name===newAssignment.dept)?.subjects || []).map(s=> <option key={s} value={s}>{s}</option>)}
           </select>
-          <select value={newScheduleDay} onChange={(e)=>setNewScheduleDay(e.target.value)} className="border p-2 rounded">
+
+          <select
+            value={newScheduleDay}
+            onChange={(e)=>setNewScheduleDay(e.target.value)}
+            className="border p-2 rounded w-full"
+          >
             <option value="">Day</option>
             {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=> <option key={d} value={d}>{d}</option>)}
           </select>
-          <select value={newScheduleTime} onChange={(e)=>setNewScheduleTime(e.target.value)} className="border p-2 rounded">
-            <option value="">Auto (first available)</option>
-            {TIME_SLOTS.map(ts => {
-              const label = `${ts.start} - ${ts.end}`;
-              return <option key={label} value={label}>{label}</option>;
-            })}
-          </select>
+
+          <div className="flex items-center gap-3 md:justify-end md:col-span-1">
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-600">Start</label>
+              <input type="time" value={newScheduleStart} onChange={(e)=>{ setNewScheduleStart(e.target.value); }} className="border p-1 rounded w-28" />
+            </div>
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-600">End</label>
+              <input type="time" value={newScheduleEnd} onChange={(e)=>{ setNewScheduleEnd(e.target.value); }} className="border p-1 rounded w-28" />
+            </div>
+          </div>
+
+          <div className="md:col-span-6 text-sm text-gray-500">(Leave both empty to auto-select the first available slot)</div>
         </div>
         <div className="flex gap-2">
           <button onClick={handleAddSchedule} className="px-3 py-1 bg-green-600 text-white rounded">Add Schedule</button>

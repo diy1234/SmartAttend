@@ -18,11 +18,12 @@ function countWorkingDays(from, to) {
 }
 
 export default function TeacherApplyLeave(){
-  const { addLeaveRequest, leaveRequests } = useContext(DataContext);
+  const { addLeaveRequest, leaveRequests, enrollments, teacherAssignments } = useContext(DataContext);
   const { user } = useContext(UserContext);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [reason, setReason] = useState('');
+  const [section, setSection] = useState('');
 
   const { showToast } = useContext(ToastContext);
 
@@ -32,6 +33,7 @@ export default function TeacherApplyLeave(){
     const req = {
       id: Date.now(),
       student: user?.email || 'teacher@local',
+      section,
       fromDate,
       toDate,
       reason,
@@ -55,7 +57,7 @@ export default function TeacherApplyLeave(){
       <h2 className="text-3xl font-bold text-[#132E6B] mb-6">Attendance Request</h2>
       <div className="bg-white p-6 rounded-xl shadow-md mb-6">
         <h3 className="text-xl font-semibold mb-3">Request Attendance</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <input type="date" value={fromDate} onChange={(e)=>setFromDate(e.target.value)} className="border p-2 rounded" />
           <input type="date" value={toDate} onChange={(e)=>setToDate(e.target.value)} className="border p-2 rounded" />
           <select className="border p-2 rounded" onChange={(e)=>setReason(e.target.value)} value={reason}>
@@ -63,6 +65,23 @@ export default function TeacherApplyLeave(){
             <option value="sick">Sick</option>
             <option value="personal">Personal</option>
             <option value="other">Other</option>
+          </select>
+          <select value={section} onChange={e=>setSection(e.target.value)} className="border p-2 rounded">
+            <option value="">Section (optional)</option>
+            {(() => {
+              // derive sections this teacher is associated with from teacherAssignments + enrollments
+              try{
+                const myAssigns = (teacherAssignments || []).filter(a => a.teacher === (user?.email)).map(a => ({ dept: a.dept, subject: a.subject }));
+                const secs = [];
+                myAssigns.forEach(as => {
+                  (enrollments || []).forEach(en => {
+                    if(en.dept === as.dept && en.subject === as.subject && en.section) secs.push(en.section);
+                  });
+                });
+                const uniq = Array.from(new Set(secs));
+                return uniq.map(s => <option key={s} value={s}>{s}</option>);
+              }catch(e){ return null; }
+            })()}
           </select>
         </div>
         <div className="mt-4 flex justify-end">

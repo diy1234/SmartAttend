@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect } from 'react';
+import api from '../utils/api';
 
 const DataContext = createContext();
 
@@ -14,6 +15,7 @@ export const DataProvider = ({ children }) => {
     { name: 'BBA', subjects: ['Business Ethics','Accounting Basics','Economics','Entrepreneurship'] },
   ];
   const [departments, setDepartments] = useState(() => JSON.parse(localStorage.getItem('departments') || JSON.stringify(defaultDepts)));
+  const [classes, setClasses] = useState([]);
   const [enrollments, setEnrollments] = useState(() => JSON.parse(localStorage.getItem('enrollments') || '[]'));
   const [teacherAssignments, setTeacherAssignments] = useState(() => JSON.parse(localStorage.getItem('teacherAssignments') || '[]'));
   const [weeklySchedule, setWeeklySchedule] = useState(() => JSON.parse(localStorage.getItem('weeklySchedule') || '[]'));
@@ -54,8 +56,22 @@ export const DataProvider = ({ children }) => {
   const removeWeeklyEntry = (id) => setWeeklySchedule(p => p.filter(e => e.id !== id));
   const getWeeklyScheduleForTeacher = (teacherEmail) => (weeklySchedule || []).filter(e => e.teacher === teacherEmail);
   const setWeeklyScheduleForTeacher = (teacherEmail, entries) => {
-    // remove existing for teacher and append provided entries (entries expected without id)
+    // remove existing for teacher and append provided entries locally
     setWeeklySchedule(p => [...p.filter(e => e.teacher !== teacherEmail), ...entries.map(en => ({ id: Date.now() + Math.random(), teacher: teacherEmail, ...en }))]);
+
+    // Attempt to notify backend so teacher receives notifications (best-effort)
+    (async () => {
+      try {
+        // lazy-load api to avoid circular requires
+        const apiModule = await import('../utils/api');
+        if (apiModule && apiModule.publishScheduleToTeacher) {
+          await apiModule.publishScheduleToTeacher(teacherEmail, entries);
+        }
+      } catch (e) {
+        // network or backend error: ignore (frontend still shows schedule)
+        console.warn('Failed to publish schedule to backend for', teacherEmail, e);
+      }
+    })();
   };
 
   // persist to localStorage when changed
@@ -90,6 +106,59 @@ export const DataProvider = ({ children }) => {
     }
   }, [attendances]);
 
+  // If backend API is available, try to fetch latest attendance records on mount
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const remote = await api.getAttendances();
+        if (mounted && Array.isArray(remote) && remote.length) {
+          setAttendances(remote);
+        }
+      } catch (e) {
+        // silently ignore network errors; keep localState
+        // console.warn('Failed to fetch attendances from API', e);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Fetch classes from backend (if available) and keep in state
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const remoteClasses = await api.getClasses();
+        if (mounted && Array.isArray(remoteClasses)) {
+          setClasses(remoteClasses);
+        }
+      } catch (e) {
+        // ignore; keep local departments
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // If logged in teacher, fetch pending attendance requests from backend
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+        if (storedUser && storedUser.role === 'teacher' && (storedUser.id || storedUser.user_id)) {
+          const teacherId = storedUser.id || storedUser.user_id;
+          const remoteReqs = await api.getPendingAttendanceRequests(teacherId);
+          if (mounted && Array.isArray(remoteReqs)) {
+            setLeaveRequests(remoteReqs);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
   // sync when other tabs change storage
   useEffect(() => {
     const onStorage = () => {
@@ -101,8 +170,52 @@ export const DataProvider = ({ children }) => {
   }, []);
 
   const addLeaveRequest = (req) => setLeaveRequests((p) => [...p, req]);
-  const updateLeaveRequest = (id, status) => setLeaveRequests((p) => p.map(r => r.id === id ? { ...r, status } : r));
-  const addAttendance = (record) => setAttendances((p) => [...p, record]);
+  // updateLeaveRequest now accepts optional meta (e.g. { approvedBy: 'admin' })
+  const updateLeaveRequest = (id, status, meta = {}) => setLeaveRequests((p) => p.map(r => r.id === id ? { ...r, status, ...meta, updatedAt: Date.now() } : r));
+  
+  // Approve / reject using backend when available, and update local state
+  const approveLeaveRequest = async (requestId) => {
+    try {
+      await api.approveAttendanceRequest(requestId);
+      updateLeaveRequest(requestId, 'approved', { respondedAt: Date.now() });
+    } catch (e) {
+      // fallback to local update
+      updateLeaveRequest(requestId, 'approved', { respondedAt: Date.now() });
+    }
+  };
+
+  const rejectLeaveRequest = async (requestId) => {
+    try {
+      await api.rejectAttendanceRequest(requestId);
+      updateLeaveRequest(requestId, 'rejected', { respondedAt: Date.now() });
+    } catch (e) {
+      updateLeaveRequest(requestId, 'rejected', { respondedAt: Date.now() });
+    }
+  };
+  const addAttendance = (record) => {
+    setAttendances((p) => [...p, record]);
+    // Attempt to sync with backend: if record.students exists and students have numeric ids
+    (async () => {
+      if (!record || !record.students || !Array.isArray(record.students)) return;
+      for (const s of record.students) {
+        const studentId = s.id;
+        // Only send if studentId is a number (backend expects numeric student_id)
+        if (studentId && !Number.isNaN(Number(studentId))) {
+          try {
+            await api.markAttendanceSingle({
+              student_id: Number(studentId),
+              class_id: record.class_id || null,
+              status: (s.status || 'Present').toString().toLowerCase(),
+              marked_by: record.submittedBy || ''
+            });
+          } catch (e) {
+            // ignore per-student POST errors; keep local copy
+            // console.warn('Failed to post attendance for', studentId, e);
+          }
+        }
+      }
+    })();
+  };
   const updateAttendance = (id, updated) => setAttendances((p) => p.map(a => a.id === id ? { ...a, ...updated } : a));
   const removeAttendance = (id) => setAttendances((p) => p.filter(a => a.id !== id));
 
@@ -110,6 +223,7 @@ export const DataProvider = ({ children }) => {
     <DataContext.Provider value={{
       leaveRequests,
       attendances,
+      classes,
       enrollments,
       teacherAssignments,
       addLeaveRequest,
@@ -133,6 +247,7 @@ export const DataProvider = ({ children }) => {
       addTeacherAssignment,
       removeTeacherAssignment,
       getAssignmentsForTeacher
+      ,approveLeaveRequest, rejectLeaveRequest
     }}>
       {children}
     </DataContext.Provider>

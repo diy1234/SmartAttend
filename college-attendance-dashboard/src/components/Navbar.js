@@ -14,13 +14,30 @@ const Navbar = () => {
   const { user, setUser } = useContext(UserContext);
 
   useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem("notifications")) || [
-      "Welcome Admin! System running smoothly.",
-      "New student registered in MCA.",
-      "Attendance updated for BCA batch.",
-    ];
-    setNotifications(stored);
-  }, []);
+    const fetchNotifications = async () => {
+      try {
+        const userId = user?.id;
+        if (!userId) return;
+        
+        const response = await fetch(
+          `http://127.0.0.1:5000/api/notifications?user_id=${userId}&unread_only=true&limit=5`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          setNotifications(data);
+        }
+      } catch (error) {
+        console.error('Error fetching notifications:', error);
+      }
+    };
+
+    fetchNotifications();
+    
+    // Refresh notifications every minute
+    const interval = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -188,6 +205,12 @@ const Navbar = () => {
             <Link to="/teacher-face" className="bg-green-600 text-white px-3 py-1 rounded-md text-sm hover:bg-green-700">Mark Attendance</Link>
           </div>
         )}
+        {/* Face registration for students */}
+        {user?.role === 'student' && (
+          <div className="mr-3">
+            <Link to="/face-registration" className="bg-blue-600 text-white px-3 py-1 rounded-md text-sm hover:bg-blue-700">Register Face</Link>
+          </div>
+        )}
         <div className="relative">
           <FaBell
             size={18}
@@ -196,13 +219,15 @@ const Navbar = () => {
             onClick={() => setShowNotifications(!showNotifications)}
           />
           {showNotifications && (
-            <div className="absolute right-0 mt-3 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-50">
+            <div className="absolute right-0 mt-3 w-80 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-50">
               <h4 className="font-semibold text-[#132E6B] mb-2 text-sm">Notifications</h4>
-              {notifications.length > 0 ? (
-                <ul className="text-gray-700 text-sm space-y-2 max-h-48 overflow-y-auto">
-                  {notifications.map((note, index) => (
-                    <li key={index} className="border-b last:border-none pb-1 hover:bg-gray-50 rounded-md px-2">
-                      {note}
+              {notifications && notifications.length > 0 ? (
+                <ul className="text-gray-700 text-sm space-y-2 max-h-56 overflow-y-auto">
+                  {notifications.map((note) => (
+                    <li key={note.id} className={`border-b last:border-none pb-2 hover:bg-gray-50 rounded-md px-2 ${!note.is_read ? 'bg-blue-50' : ''}`}>
+                      <div className="font-medium text-sm text-[#132E6B]">{note.title}</div>
+                      <div className="text-xs text-gray-600">{note.message}</div>
+                      <div className="text-xs text-gray-400 mt-1">{new Date(note.created_at).toLocaleString()}</div>
                     </li>
                   ))}
                 </ul>

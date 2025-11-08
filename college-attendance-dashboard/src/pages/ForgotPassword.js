@@ -37,7 +37,8 @@ const ForgotPassword = () => {
       
       if (response.ok) {
         setStep(2); // Move to code verification step
-        console.log("📧 Check your Flask console for the verification code!");
+        // Inform the user that the code was emailed instead of pointing to the server console
+        window.alert('A verification code was sent to your email. Please check your inbox and spam folder.');
       } else {
         setError(data.error || "Failed to send verification code");
       }
@@ -184,7 +185,7 @@ const ForgotPassword = () => {
                   maxLength="6"
                 />
                 <p className="text-xs text-gray-500 mt-1 text-center">
-                  Check your Flask console for the code
+                  Check your email (and spam folder) for the 6-digit code
                 </p>
               </div>
 
