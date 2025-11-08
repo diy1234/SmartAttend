@@ -78,7 +78,7 @@ def get_user_by_credentials(email, password, role):
         # Get additional profile data
         if role == 'student':
             cursor.execute('''
-                SELECT s.enrollment_no, s.course, s.semester  # Removed department
+                SELECT s.enrollment_no, s.course, s.semester
                 FROM students s WHERE s.user_id = ?
             ''', (user_data['id'],))
             student_data = cursor.fetchone()
