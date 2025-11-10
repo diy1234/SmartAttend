@@ -240,82 +240,40 @@ const Notifications = () => {
 
   if (loading) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-        padding: '24px'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            animation: 'spin 1s linear infinite',
-            borderRadius: '50%',
-            height: '48px',
-            width: '48px',
-            borderBottom: '2px solid #1e40af',
-            margin: '0 auto'
-          }}></div>
-          <p style={{ marginTop: '16px', color: '#4b5563' }}>Loading notifications...</p>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading notifications...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-      padding: '24px'
-    }}>
-      <div style={{ maxWidth: '56rem', margin: '0 auto' }}>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '24px'
-        }}>
+        <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 style={{
-              fontSize: '30px',
-              fontWeight: 'bold',
-              color: '#1e3a8a'
-            }}>Notifications</h1>
-            <p style={{ color: '#4b5563', marginTop: '4px' }}>
+            <h1 className="text-3xl font-bold text-blue-900">Notifications</h1>
+            <p className="text-gray-600 mt-2">
               {stats.unread_count > 0 
                 ? `${stats.unread_count} unread notification${stats.unread_count !== 1 ? 's' : ''}`
                 : 'All caught up!'
               }
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div className="flex gap-3">
             <button
               onClick={() => navigate(-1)}
-              style={{
-                backgroundColor: '#374151',
-                color: 'white',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                border: 'none',
-                cursor: 'pointer'
-              }}
-              onMouseOver={(e) => e.target.style.backgroundColor = '#4b5563'}
-              onMouseOut={(e) => e.target.style.backgroundColor = '#374151'}
+              className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
             >
               ← Back
             </button>
             {stats.unread_count > 0 && (
               <button
                 onClick={markAllAsRead}
-                style={{
-                  backgroundColor: '#2563eb',
-                  color: 'white',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-                onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
-                onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Mark All as Read
               </button>
@@ -324,102 +282,37 @@ const Notifications = () => {
         </div>
 
         {/* Stats Cards */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px',
-          marginBottom: '24px'
-        }}>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-            padding: '16px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>
-              {stats.unread_count}
-            </div>
-            <div style={{ color: '#4b5563', fontSize: '14px' }}>Unread Notifications</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <div className="text-2xl font-bold text-blue-600">{stats.unread_count}</div>
+            <div className="text-gray-600 text-sm">Unread Notifications</div>
           </div>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-            padding: '16px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#059669' }}>
-              {stats.today_count}
-            </div>
-            <div style={{ color: '#4b5563', fontSize: '14px' }}>Today's Notifications</div>
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <div className="text-2xl font-bold text-green-600">{stats.today_count}</div>
+            <div className="text-gray-600 text-sm">Today's Notifications</div>
           </div>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-            padding: '16px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#7c3aed' }}>
-              {notifications.length}
-            </div>
-            <div style={{ color: '#4b5563', fontSize: '14px' }}>Total Notifications</div>
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <div className="text-2xl font-bold text-purple-600">{notifications.length}</div>
+            <div className="text-gray-600 text-sm">Total Notifications</div>
           </div>
         </div>
 
         {/* Filters */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-          padding: '16px',
-          marginBottom: '24px'
-        }}>
-          <div style={{ display: 'flex', gap: '16px' }}>
+        <div className="bg-white rounded-lg shadow p-4 mb-6">
+          <div className="flex gap-4">
             <button
               onClick={() => setFilter('all')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '8px',
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: filter === 'all' ? '#2563eb' : '#e5e7eb',
-                color: filter === 'all' ? 'white' : '#374151'
-              }}
-              onMouseOver={(e) => {
-                if (filter !== 'all') {
-                  e.target.style.backgroundColor = '#d1d5db';
-                }
-              }}
-              onMouseOut={(e) => {
-                if (filter !== 'all') {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                }
-              }}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                filter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
             >
               All Notifications
             </button>
             <button
               onClick={() => setFilter('unread')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '8px',
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: filter === 'unread' ? '#2563eb' : '#e5e7eb',
-                color: filter === 'unread' ? 'white' : '#374151'
-              }}
-              onMouseOver={(e) => {
-                if (filter !== 'unread') {
-                  e.target.style.backgroundColor = '#d1d5db';
-                }
-              }}
-              onMouseOut={(e) => {
-                if (filter !== 'unread') {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                }
-              }}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                filter === 'unread' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
             >
               Unread Only
             </button>
@@ -427,18 +320,14 @@ const Notifications = () => {
         </div>
 
         {/* Notifications List */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
-        }}>
+        <div className="bg-white rounded-lg shadow">
           {notifications.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px 16px' }}>
-              <div style={{ fontSize: '64px', marginBottom: '16px' }}>📭</div>
-              <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
+            <div className="text-center py-12">
+              <div className="text-6xl mb-4">📭</div>
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">
                 No notifications
               </h3>
-              <p style={{ color: '#6b7280' }}>
+              <p className="text-gray-500">
                 {filter === 'unread' 
                   ? "You're all caught up! No unread notifications."
                   : "You don't have any notifications yet."
@@ -450,88 +339,46 @@ const Notifications = () => {
               {notifications.map((notification) => (
                 <div
                   key={notification.id}
-                  style={{
-                    padding: '16px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease-in-out',
-                    borderBottom: '1px solid #e5e7eb',
-                    backgroundColor: !notification.is_read ? '#eff6ff' : 'transparent',
-                    borderLeft: !notification.is_read ? '4px solid #3b82f6' : 'none'
-                  }}
-                  onMouseOver={(e) => {
-                    e.target.style.backgroundColor = !notification.is_read ? '#dbeafe' : '#f9fafb';
-                  }}
-                  onMouseOut={(e) => {
-                    e.target.style.backgroundColor = !notification.is_read ? '#eff6ff' : 'transparent';
-                  }}
+                  className={`p-6 cursor-pointer transition-colors border-b border-gray-100 hover:bg-gray-50 ${
+                    !notification.is_read ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
+                  }`}
                   onClick={() => handleNotificationClick(notification)}
                 >
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start'
-                  }}>
-                    <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
-                      <div style={{ fontSize: '24px', marginTop: '4px' }}>
+                  <div className="flex justify-between items-start">
+                    <div className="flex gap-4 flex-1">
+                      <div className="text-2xl mt-1">
                         {getNotificationIcon(notification.type)}
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                          <h3 style={{
-                            fontWeight: '600',
-                            color: !notification.is_read ? '#1e40af' : '#111827'
-                          }}>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className={`font-semibold ${
+                            !notification.is_read ? 'text-blue-900' : 'text-gray-900'
+                          }`}>
                             {notification.title}
                           </h3>
-                          <span style={{
-                            backgroundColor: '#e5e7eb',
-                            color: '#374151',
-                            fontSize: '12px',
-                            padding: '2px 8px',
-                            borderRadius: '4px'
-                          }}>
+                          <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded-full">
                             {getNotificationTypeLabel(notification.type)}
                           </span>
                           {!notification.is_read && (
-                            <span style={{
-                              backgroundColor: '#3b82f6',
-                              color: 'white',
-                              fontSize: '12px',
-                              padding: '2px 8px',
-                              borderRadius: '4px'
-                            }}>
+                            <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
                               New
                             </span>
                           )}
                         </div>
-                        <p style={{ color: '#374151', marginBottom: '8px' }}>{notification.message}</p>
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '16px',
-                          fontSize: '14px',
-                          color: '#6b7280'
-                        }}>
+                        <p className="text-gray-700 mb-3">{notification.message}</p>
+                        <div className="flex items-center gap-4 text-sm text-gray-500">
                           <span>{formatDate(notification.created_at)}</span>
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', marginLeft: '16px' }}>
+                    <div className="flex gap-2 ml-4">
                       {!notification.is_read && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             markAsRead(notification.id);
                           }}
-                          style={{
-                            color: '#2563eb',
-                            fontSize: '14px',
-                            border: 'none',
-                            background: 'none',
-                            cursor: 'pointer'
-                          }}
-                          onMouseOver={(e) => e.target.style.color = '#1d4ed8'}
-                          onMouseOut={(e) => e.target.style.color = '#2563eb'}
+                          className="text-blue-600 text-sm border-none bg-transparent cursor-pointer hover:text-blue-800"
                         >
                           Mark Read
                         </button>
@@ -541,15 +388,7 @@ const Notifications = () => {
                           e.stopPropagation();
                           deleteNotification(notification.id);
                         }}
-                        style={{
-                          color: '#dc2626',
-                          fontSize: '14px',
-                          border: 'none',
-                          background: 'none',
-                          cursor: 'pointer'
-                        }}
-                        onMouseOver={(e) => e.target.style.color = '#b91c1c'}
-                        onMouseOut={(e) => e.target.style.color = '#dc2626'}
+                        className="text-red-600 text-sm border-none bg-transparent cursor-pointer hover:text-red-800"
                       >
                         Delete
                       </button>
@@ -561,16 +400,6 @@ const Notifications = () => {
           )}
         </div>
       </div>
-
-      {/* Add CSS for spinner animation */}
-      <style>
-        {`
-          @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-        `}
-      </style>
     </div>
   );
 };

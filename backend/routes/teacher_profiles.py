@@ -30,9 +30,12 @@ def get_teacher_profile():
     cursor = conn.cursor()
     
     try:
+        # First, get the teacher profile using the numeric user_id
         cursor.execute('''
-            SELECT * FROM teacher_profiles 
-            WHERE user_id = ?
+            SELECT tp.*, u.email as user_email 
+            FROM teacher_profiles tp
+            JOIN users u ON tp.user_id = u.id
+            WHERE tp.user_id = ?
         ''', (user_id,))
         
         profile = cursor.fetchone()
@@ -53,12 +56,17 @@ def get_teacher_profile():
             # Generate faculty ID for new profile
             faculty_id = generate_faculty_id('', user_id)
             
+            # Get user email from users table
+            cursor.execute('SELECT email FROM users WHERE id = ?', (user_id,))
+            user_data = cursor.fetchone()
+            user_email = user_data['email'] if user_data else ''
+            
             # Return empty profile structure with generated faculty ID
             return jsonify({
                 'user_id': int(user_id),
                 'faculty_id': faculty_id,
                 'full_name': '',
-                'email': '',
+                'email': user_email,  # Use email from users table
                 'department': '',
                 'designation': 'Assistant Professor',
                 'gender': 'Male',
@@ -68,7 +76,8 @@ def get_teacher_profile():
                 'social_links': [],
                 'professional': '',
                 'headline': '',
-                'about_text': ''
+                'about_text': '',
+                'domain': ''
             })
             
     except Exception as e:
@@ -81,6 +90,8 @@ def save_teacher_profile():
     """Create or update teacher profile"""
     data = request.json
     
+    print(f"📥 Received profile data: {data}")  # Debug log
+    
     if not data or 'user_id' not in data:
         return jsonify({'error': 'User ID is required'}), 400
     
@@ -88,12 +99,28 @@ def save_teacher_profile():
     cursor = conn.cursor()
     
     try:
+        # Validate user_id is a valid integer
+        try:
+            user_id = int(data['user_id'])
+        except (ValueError, TypeError):
+            return jsonify({'error': 'User ID must be a valid integer'}), 400
+        
+        # Check if user exists and is a teacher
+        cursor.execute('SELECT id, role FROM users WHERE id = ?', (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if user['role'] != 'teacher':
+            return jsonify({'error': 'User is not a teacher'}), 400
+        
         # Convert social_links list to JSON string
         social_links = data.get('social_links', [])
         social_links_json = json.dumps(social_links) if social_links else '[]'
         
         # Check if profile already exists
-        cursor.execute('SELECT id, faculty_id FROM teacher_profiles WHERE user_id = ?', (data['user_id'],))
+        cursor.execute('SELECT id, faculty_id FROM teacher_profiles WHERE user_id = ?', (user_id,))
         existing_profile = cursor.fetchone()
         
         faculty_id = data.get('faculty_id', '')
@@ -106,7 +133,7 @@ def save_teacher_profile():
                 faculty_id = existing_profile['faculty_id']
             else:
                 # Generate new faculty ID
-                faculty_id = generate_faculty_id(department, data['user_id'])
+                faculty_id = generate_faculty_id(department, user_id)
         
         if existing_profile:
             # Update existing profile
@@ -115,7 +142,7 @@ def save_teacher_profile():
                     faculty_id = ?, full_name = ?, email = ?, department = ?,
                     designation = ?, gender = ?, contact = ?, photo = ?,
                     linkedin = ?, social_links = ?, professional = ?,
-                    headline = ?, about_text = ?, updated_at = CURRENT_TIMESTAMP
+                    headline = ?, about_text = ?, domain = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
             ''', (
                 faculty_id,
@@ -131,18 +158,20 @@ def save_teacher_profile():
                 data.get('professional', ''),
                 data.get('headline', ''),
                 data.get('about_text', ''),
-                data['user_id']
+                data.get('domain', ''),
+                user_id
             ))
+            action = "updated"
         else:
             # Create new profile
             cursor.execute('''
                 INSERT INTO teacher_profiles (
                     user_id, faculty_id, full_name, email, department,
                     designation, gender, contact, photo, linkedin,
-                    social_links, professional, headline, about_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    social_links, professional, headline, about_text, domain
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                data['user_id'],
+                user_id,
                 faculty_id,
                 data.get('full_name', ''),
                 data.get('email', ''),
@@ -155,18 +184,22 @@ def save_teacher_profile():
                 social_links_json,
                 data.get('professional', ''),
                 data.get('headline', ''),
-                data.get('about_text', '')
+                data.get('about_text', ''),
+                data.get('domain', '')
             ))
+            action = "created"
         
         conn.commit()
+        print(f"✅ Profile {action} successfully for user_id: {user_id}")
         return jsonify({
-            'message': 'Profile saved successfully',
+            'message': f'Profile {action} successfully',
             'faculty_id': faculty_id
         })
         
     except Exception as e:
         conn.rollback()
-        return jsonify({'error': str(e)}), 500
+        print(f"❌ Error saving profile: {str(e)}")
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
     finally:
         conn.close()
 
@@ -178,8 +211,12 @@ def generate_new_faculty_id():
     if not data or 'user_id' not in data:
         return jsonify({'error': 'User ID is required'}), 400
     
+    try:
+        user_id = int(data['user_id'])
+    except (ValueError, TypeError):
+        return jsonify({'error': 'User ID must be a valid integer'}), 400
+    
     department = data.get('department', '')
-    user_id = data['user_id']
     
     faculty_id = generate_faculty_id(department, user_id)
     
@@ -196,6 +233,11 @@ def update_profile_photo():
     if not data or 'user_id' not in data or 'photo' not in data:
         return jsonify({'error': 'User ID and photo are required'}), 400
     
+    try:
+        user_id = int(data['user_id'])
+    except (ValueError, TypeError):
+        return jsonify({'error': 'User ID must be a valid integer'}), 400
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -204,13 +246,46 @@ def update_profile_photo():
             UPDATE teacher_profiles 
             SET photo = ?, updated_at = CURRENT_TIMESTAMP 
             WHERE user_id = ?
-        ''', (data['photo'], data['user_id']))
+        ''', (data['photo'], user_id))
         
         conn.commit()
         return jsonify({'message': 'Profile photo updated successfully'})
         
     except Exception as e:
         conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@teacher_profiles_bp.route('/debug/user-info', methods=['GET'])
+def debug_user_info():
+    """Debug endpoint to get user information"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': 'User ID is required'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get user info
+        cursor.execute('SELECT id, name, email, role FROM users WHERE id = ?', (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get teacher profile info
+        cursor.execute('SELECT * FROM teacher_profiles WHERE user_id = ?', (user_id,))
+        profile = cursor.fetchone()
+        
+        return jsonify({
+            'user': dict(user) if user else None,
+            'profile': dict(profile) if profile else None
+        })
+        
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()

@@ -52,7 +52,13 @@ const Navbar = () => {
 
     // fallback: try to match the term against known pages
     const term = search.trim().toLowerCase();
-    const fallback = pages.find((p) => p.keywords.some((k) => k.includes(term)) || p.label.toLowerCase().includes(term));
+    const fallback = pages.find((p) => {
+      if (p.label.toLowerCase().includes(term)) return true;
+      return p.keywords.some((k) => {
+        const kw = k.toLowerCase();
+        return kw.includes(term) || term.includes(kw);
+      });
+    });
     if (fallback) {
       navigate(fallback.path);
       setSearch("");
@@ -63,7 +69,21 @@ const Navbar = () => {
     }
   };
 
-  const pages = [
+  // Limit searchable pages based on role. For students, restrict to student-facing pages only.
+  const pages = (user?.role === 'student') ? [
+    { label: "Student Dashboard", path: "/student-dashboard", keywords: ["dashboard", "home"] },
+    { label: "My Profile", path: "/student-profile", keywords: ["profile", "about", "my profile"] },
+    { label: "My Requests", path: "/my-requests", keywords: ["requests", "leave", "my requests"] },
+    { label: "Attendance", path: "/student-attendance", keywords: ["attendance", "records", "student attendance"] },
+    { label: "Attendance History", path: "/attendance-history", keywords: ["history", "attendance history"] },
+    { label: "About Me", path: "/student-about", keywords: ["about me", "about"] },
+    { label: "Face Registration", path: "/face-registration", keywords: ["face", "registration", "register face"] },
+    { label: "My Report", path: "/student-report", keywords: ["report", "performance", "my report"] },
+    { label: "Attendance Requests", path: "/attendance-requests", keywords: ["requests", "attendance requests"] },
+    { label: "Settings", path: "/settings", keywords: ["settings", "preferences"] },
+    { label: "About", path: "/about", keywords: ["about"] },
+    { label: "Contact", path: "/contact", keywords: ["contact"] },
+  ] : [
     { label: "Dashboard", path: "/dashboard", keywords: ["dashboard", "home"] },
     { label: "Admin Profile", path: "/admin-profile", keywords: ["profile", "admin"] },
     { label: "Admins", path: "/admins", keywords: ["admins", "administrators"] },
@@ -92,11 +112,21 @@ const Navbar = () => {
       setActiveIndex(-1);
       return;
     }
-    const pageMatches = pages.filter((p) => p.label.toLowerCase().includes(term) || p.keywords.some((k) => k.includes(term)));
-    const studentMatches = studentsList.filter((s) => s.name.toLowerCase().includes(term)).slice(0, 4).map((s) => ({ label: `Student: ${s.name}`, path: `/students?search=${encodeURIComponent(s.name)}` }));
-    const teacherMatches = teachersList.filter((t) => t.name.toLowerCase().includes(term)).slice(0, 4).map((t) => ({ label: `Teacher: ${t.name}`, path: `/teachers?search=${encodeURIComponent(t.name)}` }));
-
-    const matched = [...pageMatches, ...studentMatches, ...teacherMatches].slice(0, 8);
+    const pageMatches = pages.filter((p) => {
+      if (p.label.toLowerCase().includes(term)) return true;
+      return p.keywords.some((k) => {
+        const kw = k.toLowerCase();
+        return kw.includes(term) || term.includes(kw);
+      });
+    });
+    // For students, only show page matches (restrict search to student features/pages)
+    let matched = pageMatches;
+    if (user?.role !== 'student') {
+      const studentMatches = studentsList.filter((s) => s.name.toLowerCase().includes(term)).slice(0, 4).map((s) => ({ label: `Student: ${s.name}`, path: `/students?search=${encodeURIComponent(s.name)}` }));
+      const teacherMatches = teachersList.filter((t) => t.name.toLowerCase().includes(term)).slice(0, 4).map((t) => ({ label: `Teacher: ${t.name}`, path: `/teachers?search=${encodeURIComponent(t.name)}` }));
+      matched = [...pageMatches, ...studentMatches, ...teacherMatches];
+    }
+    matched = matched.slice(0, 8);
     setSuggestions(matched);
     setActiveIndex(-1);
   };

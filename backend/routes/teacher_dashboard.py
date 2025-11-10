@@ -7,7 +7,7 @@ teacher_dashboard_bp = Blueprint('teacher_dashboard', __name__)
 
 @teacher_dashboard_bp.route('/my-courses', methods=['GET'])
 def get_teacher_courses():
-    """Get all courses for a teacher"""
+    """Get all courses for a teacher with proper department info"""
     try:
         # Get teacher ID from query parameter
         teacher_id = request.args.get('teacher_id')
@@ -28,18 +28,19 @@ def get_teacher_courses():
         
         teacher_profile_id = teacher_profile['id']
         
-        # Get classes assigned to this teacher with schedule information
+        # Get classes assigned to this teacher with proper enrollment information
         cursor.execute('''
             SELECT 
-                c.id as class_id,
+                c.id as id,
                 c.class_name as subject,
                 c.subject_code,
                 c.schedule,
+                COALESCE(e.department, 'Computer Science') as department,
                 COUNT(DISTINCT e.student_id) as student_count
             FROM classes c
             LEFT JOIN enrollment e ON c.id = e.class_id
             WHERE c.teacher_id = ?
-            GROUP BY c.id, c.class_name, c.subject_code, c.schedule
+            GROUP BY c.id, c.class_name, c.subject_code, c.schedule, e.department
             ORDER BY c.class_name
         ''', (teacher_profile_id,))
         
@@ -49,16 +50,20 @@ def get_teacher_courses():
         formatted_courses = []
         for cls in classes:
             formatted_courses.append({
-                'id': cls['class_id'],  # Use class_id instead of schedule_id
+                'id': cls['id'],
                 'subject': cls['subject'],
                 'subject_code': cls['subject_code'],
-                'schedule': cls['schedule'],
-                'department': 'Computer Science',  # Default department
-                'room': 'TBA',  # Default room
+                'schedule': cls['schedule'] or 'Not scheduled',
+                'department': cls['department'],
+                'room': 'TBA',
                 'student_count': cls['student_count']
             })
         
         conn.close()
+        
+        print(f"📚 Returning {len(formatted_courses)} courses for teacher {teacher_id}")
+        for course in formatted_courses:
+            print(f"  - {course['subject']} ({course['department']}) - {course['student_count']} students")
         
         return jsonify({
             'courses': formatted_courses,
@@ -145,6 +150,7 @@ def get_course_students(class_id):
         course = cursor.fetchone()
         
         if not course:
+            conn.close()
             return jsonify({'error': 'Course not found'}), 404
         
         # Get teacher name
@@ -202,6 +208,8 @@ def get_course_students(class_id):
             })
         
         conn.close()
+        
+        print(f"📋 Returning {len(formatted_students)} students for class {class_id}")
         
         return jsonify({
             'course': {
@@ -343,7 +351,11 @@ def mark_attendance():
             return jsonify({'error': 'Class not found'}), 404
         
         subject = class_info['class_name']
-        department = 'Computer Science'  # Default department
+        
+        # Get department from enrollment
+        cursor.execute('SELECT department FROM enrollment WHERE class_id = ? LIMIT 1', (class_id,))
+        dept_result = cursor.fetchone()
+        department = dept_result['department'] if dept_result else 'Computer Science'
         
         # Mark attendance for each student
         success_count = 0
@@ -561,7 +573,8 @@ def get_weekly_schedule():
                 'time': f"{schedule['start_time']} - {schedule['end_time']}",
                 'subject': schedule['subject'],
                 'room': schedule['room'],
-                'department': schedule['department']
+                'department': schedule['department'],
+                'dept': schedule['department']  # Add dept alias for consistency
             })
         
         # Also get classes without specific schedules
@@ -590,7 +603,8 @@ def get_weekly_schedule():
                 'time': schedule_parts[1] if len(schedule_parts) > 1 else 'TBA',
                 'subject': cls['subject'],
                 'room': 'TBA',
-                'department': 'Computer Science'
+                'department': 'Computer Science',
+                'dept': 'Computer Science'
             })
         
         conn.close()

@@ -9,14 +9,13 @@ export default function StudentDashboard() {
   const [studentProfile, setStudentProfile] = useState(null);
   const [attendanceData, setAttendanceData] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [enrolledClasses, setEnrolledClasses] = useState([]);
   
   // Form states for attendance request
   const [requestForm, setRequestForm] = useState({
-    dept: '',
+    department: '',
     subject: '',
-    section: '',
-    fromDate: '',
-    toDate: '',
+    request_date: '',
     reason: ''
   });
 
@@ -33,28 +32,70 @@ export default function StudentDashboard() {
           return;
         }
 
-        // Fetch student profile
+        // Fetch student profile with detailed information
         try {
           const profileResponse = await api.get(`/users/profile?user_id=${userId}`);
-          setStudentProfile(profileResponse.data.profile);
+          const profileData = profileResponse.data.profile;
+          
+          // If we have student profile, fetch additional student details
+          if (profileData && profileData.id) {
+            try {
+              const studentDetailResponse = await api.get(`/api/student/profile/${profileData.id}`);
+              setStudentProfile({
+                ...profileData,
+                ...studentDetailResponse.data.profile
+              });
+            } catch (detailError) {
+              console.error('Student detail fetch error:', detailError);
+              setStudentProfile(profileData);
+            }
+          } else {
+            setStudentProfile(profileData);
+          }
         } catch (profileError) {
           console.error('Profile fetch error:', profileError);
+          setStudentProfile(currentUser);
         }
 
-        // Fetch attendance data
+        // Fetch attendance data for student
         try {
-          const attendanceResponse = await api.get(`/attendance?student_id=${userId}`);
+          const attendanceResponse = await api.get(`/api/attendance/student/${userId}`);
           setAttendanceData(attendanceResponse.data.attendances || []);
         } catch (attendanceError) {
           console.error('Attendance fetch error:', attendanceError);
+          // Fallback to general endpoint
+          try {
+            const fallbackResponse = await api.get(`/attendance?student_id=${userId}`);
+            setAttendanceData(fallbackResponse.data.attendances || []);
+          } catch (fallbackError) {
+            console.error('Fallback attendance fetch error:', fallbackError);
+          }
         }
 
-        // Fetch leave requests
+        // Fetch leave requests for student
         try {
-          const leaveResponse = await api.get(`/attendance-requests?student_id=${userId}`);
+          const leaveResponse = await api.get(`/api/attendance-requests/student/${userId}`);
           setLeaveRequests(leaveResponse.data.requests || []);
         } catch (leaveError) {
           console.error('Leave requests fetch error:', leaveError);
+        }
+
+        // Fetch enrolled classes to populate dropdowns
+        try {
+          const classesResponse = await api.get(`/api/student/enrolled-classes/${userId}`);
+          setEnrolledClasses(classesResponse.data.classes || []);
+          
+          // Pre-populate form with available subjects if any
+          if (classesResponse.data.classes && classesResponse.data.classes.length > 0) {
+            const firstClass = classesResponse.data.classes[0];
+            setRequestForm(prev => ({
+              ...prev,
+              department: firstClass.department || '',
+              subject: firstClass.subject || ''
+            }));
+          }
+        } catch (classesError) {
+          console.error('Classes fetch error:', classesError);
         }
 
       } catch (error) {
@@ -85,47 +126,77 @@ export default function StudentDashboard() {
   };
 
   const submitAttendanceRequest = async () => {
-    if (!requestForm.fromDate || !requestForm.toDate || !requestForm.reason) {
-      alert('Please fill all required fields');
-      return;
-    }
+  console.log("🔄 Submitting attendance request...");
+  console.log("📋 Form data:", requestForm);
 
+  if (!requestForm.request_date) {
+    alert('Please select a date for the attendance request');
+    return;
+  }
+
+  if (!requestForm.department || !requestForm.subject) {
+    alert('Please select department and subject');
+    return;
+  }
+
+  try {
+    const currentUser = JSON.parse(localStorage.getItem('user')) || {};
+    const userId = currentUser.id || currentUser.user_id;
+
+    console.log("👤 Current user ID:", userId);
+
+    // First, test with debug endpoint
+    const testData = {
+      student_id: userId,
+      teacher_id: 1, // Fallback teacher ID
+      department: requestForm.department,
+      subject: requestForm.subject,
+      request_date: requestForm.request_date,
+      reason: requestForm.reason || '',
+      status: 'pending'
+    };
+
+    console.log("🧪 Testing with data:", testData);
+
+    // Test with debug endpoint first
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user')) || {};
-      const newRequest = {
-        student_id: currentUser.id || currentUser.user_id,
-        dept: requestForm.dept,
-        subject: requestForm.subject,
-        section: requestForm.section,
-        from_date: requestForm.fromDate,
-        to_date: requestForm.toDate,
-        reason: requestForm.reason,
-        status: 'pending'
-      };
-
-      const response = await api.post('/attendance-requests', newRequest);
-      
-      if (response.data.success) {
-        alert('Attendance request submitted successfully!');
-        // Refresh leave requests
-        const leaveResponse = await api.get(`/attendance-requests?student_id=${currentUser.id || currentUser.user_id}`);
-        setLeaveRequests(leaveResponse.data.requests || []);
-        
-        // Reset form
-        setRequestForm({
-          dept: '',
-          subject: '',
-          section: '',
-          fromDate: '',
-          toDate: '',
-          reason: ''
-        });
-      }
-    } catch (error) {
-      console.error('Error submitting request:', error);
-      alert('Error submitting request. Please try again.');
+      const debugResponse = await api.post('/debug/attendance-request', testData);
+      console.log("✅ Debug endpoint response:", debugResponse.data);
+    } catch (debugError) {
+      console.error("❌ Debug endpoint error:", debugError);
     }
-  };
+
+    // Then try the real endpoint
+    const response = await api.post('/attendance-requests', testData);
+    console.log("✅ Real endpoint response:", response.data);
+    
+    if (response.data.success) {
+      alert('Attendance request submitted successfully!');
+      
+      // Refresh leave requests
+      const leaveResponse = await api.get(`/attendance-requests/student/${userId}`);
+      setLeaveRequests(leaveResponse.data.requests || []);
+      
+      // Reset form
+      setRequestForm({
+        department: '',
+        subject: '',
+        request_date: '',
+        reason: ''
+      });
+    } else {
+      alert('Failed to submit request: ' + (response.data.error || 'Unknown error'));
+    }
+  } catch (error) {
+    console.error('❌ Error submitting request:', error);
+    console.error('❌ Error details:', error.response?.data);
+    alert('Error submitting request. Check console for details.');
+  }
+};
+
+  // Get unique departments and subjects from enrolled classes
+  const availableDepartments = [...new Set(enrolledClasses.map(cls => cls.department).filter(Boolean))];
+  const availableSubjects = [...new Set(enrolledClasses.map(cls => cls.subject).filter(Boolean))];
 
   if (loading) {
     return (
@@ -150,14 +221,19 @@ export default function StudentDashboard() {
       <div className="bg-white rounded-xl shadow-md p-6 mb-8">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="flex items-center gap-6">
-            <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
-              {(studentProfile?.name || 'S').charAt(0).toUpperCase()}
+            <div
+              role="button"
+              onClick={() => navigate('/student-profile')}
+              className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold cursor-pointer"
+              title="View Profile"
+            >
+              {((studentProfile?.name || JSON.parse(localStorage.getItem('user')|| '{}').name) || 'S').charAt(0).toUpperCase()}
             </div>
             <div>
-              <h2 className="text-2xl font-semibold text-gray-800">
-                {studentProfile?.name || 'Student Name'}
+              <h2 className="text-2xl font-semibold text-gray-800 cursor-pointer" onClick={() => navigate('/student-profile')}>
+                {studentProfile?.name || JSON.parse(localStorage.getItem('user')|| '{}').name || 'Student Name'}
               </h2>
-              <p className="text-gray-600">{studentProfile?.email || 'No email'}</p>
+              <p className="text-gray-600">{studentProfile?.email || JSON.parse(localStorage.getItem('user')|| '{}').email || 'No email'}</p>
               <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-600">
                 {studentProfile?.enrollment_no && (
                   <span><strong>Enrollment:</strong> {studentProfile.enrollment_no}</span>
@@ -167,6 +243,9 @@ export default function StudentDashboard() {
                 )}
                 {studentProfile?.department && (
                   <span><strong>Department:</strong> {studentProfile.department}</span>
+                )}
+                {studentProfile?.semester && (
+                  <span><strong>Semester:</strong> {studentProfile.semester}</span>
                 )}
               </div>
             </div>
@@ -235,19 +314,30 @@ export default function StudentDashboard() {
         <h3 className="text-xl font-semibold text-gray-800 mb-6">Attendance Request</h3>
         
         <div className="space-y-6">
-          {/* Department, Subject, Section Row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Department, Subject Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
               <select 
-                value={requestForm.dept}
-                onChange={(e) => handleInputChange('dept', e.target.value)}
+                value={requestForm.department}
+                onChange={(e) => handleInputChange('department', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Select Department</option>
-                <option value="MCA">MCA</option>
-                <option value="MBA">MBA</option>
-                <option value="B.Tech">B.Tech</option>
+                {availableDepartments.length > 0 ? (
+                  availableDepartments.map((dept, index) => (
+                    <option key={index} value={dept}>
+                      {dept}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="Computer Science">Computer Science</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Electrical Engineering">Electrical Engineering</option>
+                  </>
+                )}
               </select>
             </div>
             
@@ -259,46 +349,32 @@ export default function StudentDashboard() {
                 className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Select Subject</option>
-                <option value="Artificial Intelligence">Artificial Intelligence</option>
-                <option value="Data Structures">Data Structures</option>
-                <option value="Web Development">Web Development</option>
-                <option value="Database Management">Database Management</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Section</label>
-              <select 
-                value={requestForm.section}
-                onChange={(e) => handleInputChange('section', e.target.value)}
-                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Section (optional)</option>
-                <option value="A">Section A</option>
-                <option value="B">Section B</option>
-                <option value="C">Section C</option>
+                {availableSubjects.length > 0 ? (
+                  availableSubjects.map((subject, index) => (
+                    <option key={index} value={subject}>
+                      {subject}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="Data Structures">Data Structures</option>
+                    <option value="Web Development">Web Development</option>
+                    <option value="Database Systems">Database Systems</option>
+                    <option value="Artificial Intelligence">Artificial Intelligence</option>
+                  </>
+                )}
               </select>
             </div>
           </div>
 
-          {/* Date Range Row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Single Date Row */}
+          <div className="grid grid-cols-1 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
               <input 
                 type="date" 
-                value={requestForm.fromDate}
-                onChange={(e) => handleInputChange('fromDate', e.target.value)}
-                className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
-              <input 
-                type="date" 
-                value={requestForm.toDate}
-                onChange={(e) => handleInputChange('toDate', e.target.value)}
+                value={requestForm.request_date}
+                onChange={(e) => handleInputChange('request_date', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
@@ -307,18 +383,15 @@ export default function StudentDashboard() {
           {/* Reason and Submit Row */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Reason</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Reason (optional)</label>
               <select 
                 value={requestForm.reason}
                 onChange={(e) => handleInputChange('reason', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Select reason</option>
-                <option value="sick">Sick</option>
-                <option value="personal">Personal</option>
-                <option value="medical">Medical</option>
-                <option value="family">Family Emergency</option>
-                <option value="other">Other</option>
+                <option value="">Select reason (optional)</option>
+                <option value="face_not_recognised">Face not recognised</option>
+                <option value="portal_not_working">Portal not working</option>
               </select>
             </div>
             
@@ -332,52 +405,6 @@ export default function StudentDashboard() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* My Leave Requests */}
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <h3 className="text-xl font-semibold text-gray-800 mb-6">My Leave Requests</h3>
-        
-        {leaveRequests.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-gray-400 text-6xl mb-4">📋</div>
-            <p className="text-gray-500 text-lg">No leave requests yet.</p>
-            <p className="text-gray-400 text-sm mt-2">Submit a request above to see it here.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="p-4 text-left font-semibold text-gray-700">Subject</th>
-                  <th className="p-4 text-left font-semibold text-gray-700">From</th>
-                  <th className="p-4 text-left font-semibold text-gray-700">To</th>
-                  <th className="p-4 text-left font-semibold text-gray-700">Reason</th>
-                  <th className="p-4 text-left font-semibold text-gray-700">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leaveRequests.map(request => (
-                  <tr key={request.id} className="border-b hover:bg-gray-50">
-                    <td className="p-4 text-gray-800">{request.subject}</td>
-                    <td className="p-4 text-gray-700">{request.from_date}</td>
-                    <td className="p-4 text-gray-700">{request.to_date}</td>
-                    <td className="p-4 text-gray-700">{request.reason}</td>
-                    <td className="p-4">
-                      <span className={`px-3 py-2 rounded-full text-sm font-semibold ${
-                        request.status === 'approved' ? 'bg-green-100 text-green-800' :
-                        request.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {request.status?.charAt(0).toUpperCase() + request.status?.slice(1) || 'Pending'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );

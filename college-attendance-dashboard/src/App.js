@@ -40,6 +40,7 @@ import UserContext from "./context/UserContext";
 import { DataProvider } from "./context/DataContext";
 import { ToastProvider } from './context/ToastContext';
 import ToastContainer from './components/ToastContainer';
+import Notifications from './pages/Notifications';
 
 // Protected route
 function ProtectedRoute({ children, allowedRoles }) {
@@ -119,6 +120,7 @@ function App() {
                   <Route path="/take-attendance" element={<ProtectedRoute><TakeAttendance /></ProtectedRoute>} />
                   <Route path="/teacher-face" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherFacialAttendance /></ProtectedRoute>} />
                   <Route path="/face-registration" element={<ProtectedRoute allowedRoles={["student"]}><FaceRegistration /></ProtectedRoute>} />
+                  <Route path="/notifications" element={<Notifications />} />
                   <Route path="/admin-profile" element={<ProtectedRoute><AdminProfile /></ProtectedRoute>} />
                   <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
                   <Route path="/departments/:dept/:subject" element={<ProtectedRoute><SubjectDetails /></ProtectedRoute>} />
