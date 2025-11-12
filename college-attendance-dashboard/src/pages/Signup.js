@@ -69,12 +69,12 @@ const Signup = ({ onSignup }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 to-blue-300 p-6">
+    <div className="min-h-screen flex items-center justify-center auth-hero p-6">
       <motion.div
         initial={{ y: -40, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.6 }}
-        className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md"
+        className="auth-card p-8 rounded-2xl w-full max-w-md"
       >
         <div className="flex items-center justify-center gap-3 mb-6">
           <a href="/" className="inline-flex items-center">

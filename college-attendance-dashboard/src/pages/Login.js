@@ -71,12 +71,12 @@ const Login = ({ onLogin }) => {
 };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-blue-200 to-blue-300">
+    <div className="min-h-screen flex items-center justify-center auth-hero p-6">
       <motion.div
         initial={{ opacity: 0, y: -40 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
-        className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md"
+        className="auth-card p-10 rounded-3xl w-full max-w-md"
       >
         {/* Website Name */}
         <div className="flex items-center justify-center gap-3 mb-2">
