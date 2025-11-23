@@ -190,38 +190,75 @@ export default function TeacherAboutMe(){
         })
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMsg = result?.error || `HTTP error! status: ${response.status}`;
+        throw new Error(errorMsg);
       }
 
-      const result = await response.json();
+      if (!result.message || !result.faculty_id) {
+        console.warn('Unexpected response from backend:', result);
+      }
       
       // Update local state with potentially new faculty ID from backend
       const finalProfile = { ...updatedProfile, faculty_id: result.faculty_id || updatedProfile.faculty_id };
       setLocal(finalProfile);
       
-      // Update localStorage for offline fallback
-      const currentUser = JSON.parse(localStorage.getItem('user')) || {};
-      const mergedUser = { 
-        ...currentUser, 
-        teacherProfile: finalProfile,
-        name: finalProfile.full_name || currentUser.name,
-        email: finalProfile.email || currentUser.email,
-        photo: finalProfile.photo || currentUser.photo
-      };
-      localStorage.setItem('user', JSON.stringify(mergedUser));
-      
-      // Update user context
-      if (setUser) {
-        setUser(mergedUser);
+      // Update localStorage for offline fallback (but DON'T store the large photo base64)
+      try {
+        const currentUser = JSON.parse(localStorage.getItem('user')) || {};
+        
+        // Create a profile object for localStorage WITHOUT the photo (to avoid quota exceeded)
+        const profileForStorage = {
+          faculty_id: finalProfile.faculty_id,
+          full_name: finalProfile.full_name,
+          email: finalProfile.email,
+          department: finalProfile.department,
+          designation: finalProfile.designation,
+          gender: finalProfile.gender,
+          contact: finalProfile.contact,
+          linkedin: finalProfile.linkedin,
+          social_links: finalProfile.social_links,
+          professional: finalProfile.professional,
+          headline: finalProfile.headline,
+          about_text: finalProfile.about_text
+          // NOTE: photo is NOT included here to keep localStorage small
+        };
+        
+        const mergedUser = { 
+          ...currentUser, 
+          teacherProfile: profileForStorage,
+          name: finalProfile.full_name || currentUser.name,
+          email: finalProfile.email || currentUser.email
+          // NOTE: photo is NOT stored here either; it's only in component state
+        };
+        localStorage.setItem('user', JSON.stringify(mergedUser));
+        
+        // Update user context (also WITHOUT the large photo)
+        if (setUser) {
+          setUser(mergedUser);
+        }
+      } catch (storageError) {
+        console.warn('⚠️ Could not update localStorage (quota exceeded or disabled):', storageError);
+        // Still update the context even if localStorage fails
+        if (setUser) {
+          setUser(prev => ({
+            ...prev,
+            teacherProfile: { ...finalProfile },
+            name: finalProfile.full_name || prev.name,
+            email: finalProfile.email || prev.email
+          }));
+        }
       }
       
+      console.log('✅ Profile saved successfully:', finalProfile);
       setMessage('Profile saved successfully!');
       setTimeout(() => setMessage(''), 3000);
       
     } catch (error) {
-      console.error('Error saving profile:', error);
-      setMessage('Error saving profile. Please try again.');
+      console.error('❌ Error saving profile:', error?.message || error);
+      setMessage(`Error saving profile: ${error?.message || 'Please try again.'}`);
       setTimeout(() => setMessage(''), 5000);
     } finally {
       setSaving(false);
@@ -252,24 +289,16 @@ export default function TeacherAboutMe(){
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Update local state
+      // Update local state (photo is kept in component state, not localStorage)
       setLocal(prev => ({ ...prev, photo: photoData }));
       
-      // Update localStorage
-      const currentUser = JSON.parse(localStorage.getItem('user')) || {};
-      const updatedUser = { ...currentUser, photo: photoData };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      if (setUser) {
-        setUser(updatedUser);
-      }
+      // DO NOT store photo in localStorage - it's too large
+      // The photo will be displayed from component state and re-fetched from backend on next load
       
     } catch (error) {
       console.error('Error saving profile photo:', error);
-      // Fallback to localStorage only
-      const currentUser = JSON.parse(localStorage.getItem('user')) || {};
-      const updatedUser = { ...currentUser, photo: photoData };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      // Still update local state so user can see the preview
+      setLocal(prev => ({ ...prev, photo: photoData }));
     }
   };
 

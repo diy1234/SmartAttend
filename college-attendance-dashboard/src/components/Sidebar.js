@@ -41,7 +41,7 @@ const Sidebar = () => {
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
-              <Link to="/attendance-requests">Attendance Requests ({pendingCount})</Link>
+              <Link to="/attendance-requests">Attendance Requests</Link>
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
@@ -57,7 +57,7 @@ const Sidebar = () => {
             {/* Admin: expose Attendance Requests and overview */}
               <li className="flex items-center space-x-2 hover:text-blue-300">
                 <BookOpen size={18} />
-                <Link to="/attendance-requests">Attendance Requests ({pendingCount})</Link>
+                <Link to="/attendance-requests">Attendance Requests</Link>
               </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />

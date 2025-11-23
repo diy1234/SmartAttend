@@ -1,112 +1,201 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import UserContext from '../context/UserContext';
+import ToastContext from '../context/ToastContext';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
     total_students: 0,
     total_teachers: 0,
     total_departments: 0,
-    total_subjects: 0,
-    avg_attendance: 0
+    total_courses: 0,
+    avg_attendance: 0,
   });
-  
+
   const [departmentAttendance, setDepartmentAttendance] = useState([]);
-  const [attendanceDistribution, setAttendanceDistribution] = useState({ 
-    above_75: 0, 
-    below_75: 0 
-  });
+  const [distribution, setDistribution] = useState({ above_75: 0, below_75: 0 });
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const navigate = useNavigate();
+  const [notificationStats, setNotificationStats] = useState({ unread_count: 0 });
 
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
+
+  // contexts
+  const { user } = useContext(UserContext);
+  const { showToast } = useContext(ToastContext);
+
+  // Fetch all dashboard data on load
   useEffect(() => {
     fetchDashboardData();
+    fetchNotificationStats();
   }, []);
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      console.log("🔄 Fetching data from backend APIs...");
 
-      // Build API base URL from environment or default to localhost:5000 in development
-      const API_BASE = (process.env.REACT_APP_API_BASE_URL && process.env.REACT_APP_API_BASE_URL.replace(/\/$/, '')) || '';
-
-      // If no REACT_APP_API_BASE_URL is provided, the app will use the dev-server proxy (see package.json proxy)
-      const statsUrl = `${API_BASE}/api/admin/stats`;
-      const deptUrl = `${API_BASE}/api/admin/department-attendance`;
-      const distUrl = `${API_BASE}/api/admin/attendance-distribution`;
-
-      const [statsResponse, deptResponse, distResponse] = await Promise.all([
-        fetch(statsUrl),
-        fetch(deptUrl),
-        fetch(distUrl)
+      const [statsRes, deptRes, distRes] = await Promise.all([
+        fetch("http://127.0.0.1:5000/api/admin/stats"),
+        fetch("http://127.0.0.1:5000/api/admin/department-attendance"),
+        fetch("http://127.0.0.1:5000/api/admin/attendance-distribution"),
       ]);
 
-      console.log("API Responses:", {
-        stats: statsResponse.status,
-        dept: deptResponse.status,
-        dist: distResponse.status
+      if (!statsRes.ok || !deptRes.ok || !distRes.ok)
+        throw new Error("One or more API requests failed");
+
+      const statsData = await statsRes.json();
+      const deptData = await deptRes.json();
+      const distData = await distRes.json();
+
+      setStats({
+        total_students: statsData.total_students,
+        total_teachers: statsData.total_teachers,
+        total_departments: statsData.total_departments,
+        total_courses: statsData.total_courses || statsData.total_subjects,
+        avg_attendance: statsData.avg_attendance || 0,
       });
 
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json();
-        console.log("📊 Stats data:", statsData);
-        setStats(statsData);
-      } else {
-        console.warn("Stats API failed, using fallback data");
-        setStats({
-          total_students: 45,
-          total_teachers: 8,
-          total_departments: 7,
-          total_subjects: 15,
-          avg_attendance: 82
-        });
-      }
-
-      if (deptResponse.ok) {
-        const deptData = await deptResponse.json();
-        console.log("📈 Department data:", deptData);
-        setDepartmentAttendance(deptData.department_attendance || []);
-      } else {
-        console.warn("Department API failed, using fallback data");
-        setDepartmentAttendance([
-          { dept: 'Computer Science', percent: 85, present: 34, total: 40 },
-          { dept: 'Mathematics', percent: 78, present: 31, total: 40 },
-          { dept: 'Physics', percent: 72, present: 29, total: 40 },
-          { dept: 'Chemistry', percent: 88, present: 35, total: 40 }
-        ]);
-      }
-
-      if (distResponse.ok) {
-        const distData = await distResponse.json();
-        console.log("📊 Distribution data:", distData);
-        setAttendanceDistribution(distData);
-      } else {
-        console.warn("Distribution API failed, using fallback data");
-        setAttendanceDistribution({ above_75: 60, below_75: 40 });
-      }
-
+      setDepartmentAttendance(deptData);
+      setDistribution(distData);
     } catch (error) {
-      console.error("💥 Error fetching dashboard data:", error);
-      // Fallback to your actual database data
+      console.error("Error fetching dashboard data:", error);
+
+      // Fallback demo data if backend fails
       setStats({
         total_students: 45,
         total_teachers: 8,
         total_departments: 7,
-        total_subjects: 15,
-        avg_attendance: 82
+        total_courses: 15,
+        avg_attendance: 82,
       });
       setDepartmentAttendance([
-        { dept: 'Computer Science', percent: 85, present: 34, total: 40 },
-        { dept: 'Mathematics', percent: 78, present: 31, total: 40 },
-        { dept: 'Physics', percent: 72, present: 29, total: 40 }
+        { department: "Computer Science", percent: 85 },
+        { department: "Mathematics", percent: 78 },
+        { department: "Physics", percent: 72 },
+        { department: "Chemistry", percent: 88 },
       ]);
-      setAttendanceDistribution({ above_75: 60, below_75: 40 });
+      setDistribution({ above_75: 60, below_75: 40 });
     } finally {
       setLoading(false);
       setLastUpdated(new Date());
     }
   };
+  // Notification helpers
+  const fetchNotificationStats = async () => {
+    try {
+      const userId = user?.id || JSON.parse(localStorage.getItem('user'))?.id;
+      if (!userId) return;
+      const res = await fetch(`http://127.0.0.1:5000/api/notifications/stats?user_id=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotificationStats(data);
+      }
+    } catch (err) {
+      console.error('Error fetching notification stats:', err);
+    }
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      setLoadingNotifications(true);
+      const userId = user?.id || JSON.parse(localStorage.getItem('user'))?.id;
+      if (!userId) {
+        showToast && showToast('User ID not found', 'error');
+        return;
+      }
+
+      const res = await fetch(`http://127.0.0.1:5000/api/notifications?user_id=${userId}&limit=20`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setNotifications(data);
+      setShowNotifications(true);
+    } catch (err) {
+      console.error('Error fetching notifications:', err);
+      showToast && showToast('Failed to load notifications', 'error');
+    } finally {
+      setLoadingNotifications(false);
+    }
+  };
+
+  const markAsRead = async (notificationId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/api/notifications/${notificationId}/read`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
+      setNotificationStats(prev => ({ ...prev, unread_count: Math.max(0, (prev.unread_count || 0) - 1) }));
+    } catch (err) {
+      console.error('Error marking notification read:', err);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const userId = user?.id || JSON.parse(localStorage.getItem('user'))?.id;
+      if (!userId) return;
+      const res = await fetch('http://127.0.0.1:5000/api/notifications/read-all', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      setNotificationStats(prev => ({ ...prev, unread_count: 0 }));
+      showToast && showToast(result.message || 'Marked all as read', 'success');
+    } catch (err) {
+      console.error('Error marking all as read:', err);
+      showToast && showToast('Failed to mark all as read', 'error');
+    }
+  };
+
+  const handleNotificationClick = (notification) => {
+    if (!notification.is_read) markAsRead(notification.id);
+    setShowNotifications(false);
+    switch (notification.type) {
+      case 'attendance_request':
+        navigate('/attendance-requests');
+        break;
+      case 'class_scheduled':
+        navigate('/teacher-dashboard');
+        break;
+      default:
+        navigate('/notifications');
+        break;
+    }
+  };
+
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case 'attendance_request': return '📋';
+      case 'class_scheduled': return '📅';
+      case 'system': return '⚙️';
+      default: return '📢';
+    }
+  };
+
+  const formatNotificationDate = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return `Today at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    if (diffDays === 1) return `Yesterday at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
+  };
+
 
   const refreshData = () => {
     fetchDashboardData();
@@ -114,12 +203,11 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <h1 className="text-3xl font-bold text-[#132E6B] mb-6">🏫 Admin Dashboard</h1>
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <div className="ml-4 text-lg text-gray-600">Loading live data from database...</div>
-        </div>
+      <div className="p-6 flex flex-col items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <p className="mt-4 text-gray-600 text-lg">
+          Loading live data from database...
+        </p>
       </div>
     );
   }
@@ -128,150 +216,212 @@ export default function AdminDashboard() {
     <div className="p-6">
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-[#132E6B]">
+        <h1 className="text-3xl font-bold text-[#132E6B] flex items-center gap-2">
           🏫 Admin Dashboard
-          <span className="text-sm ml-2 bg-green-100 text-green-800 px-2 py-1 rounded">
-            LIVE DATABASE
+          <span className="text-sm bg-green-100 text-green-800 px-2 py-1 rounded">
           </span>
         </h1>
-        <button 
-          onClick={refreshData}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          🔄 Refresh Data
-        </button>
-      </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <Link to="/students" className="block p-6 rounded-xl shadow text-white bg-blue-500 hover:scale-[1.01] transform transition-all" aria-label="View students">
-          <div className="text-sm">Total Students</div>
-          <div className="text-2xl font-bold mt-2">{stats.total_students}</div>
-          <div className="text-xs opacity-75 mt-1">From Database</div>
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* Notification Bell */}
+          <div className="relative">
+            <button
+              onClick={fetchNotifications}
+              className="relative p-3 bg-white rounded-full shadow-md hover:shadow-lg transition-shadow"
+            >
+              <span className="text-2xl">🔔</span>
+              {notificationStats.unread_count > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full text-xs w-5 h-5 flex items-center justify-center">
+                  {notificationStats.unread_count}
+                </span>
+              )}
+            </button>
 
-        <Link to="/teachers" className="block p-6 rounded-xl shadow text-white bg-green-500 hover:scale-[1.01] transform transition-all" aria-label="View teachers">
-          <div className="text-sm">Total Teachers</div>
-          <div className="text-2xl font-bold mt-2">{stats.total_teachers}</div>
-          <div className="text-xs opacity-75 mt-1">Active</div>
-        </Link>
-
-        <Link to="/manage-departments" className="block p-6 rounded-xl shadow text-white bg-yellow-500 hover:scale-[1.01] transform transition-all" aria-label="Manage departments">
-          <div className="text-sm">Departments</div>
-          <div className="text-2xl font-bold mt-2">{stats.total_departments}</div>
-          <div className="text-xs opacity-75 mt-1">Available</div>
-        </Link>
-
-        <Link to="/manage-departments" className="block p-6 rounded-xl shadow text-white bg-purple-500 hover:scale-[1.01] transform transition-all" aria-label="View courses">
-          <div className="text-sm">Courses</div>
-          <div className="text-2xl font-bold mt-2">{stats.total_subjects}</div>
-          <div className="text-xs opacity-75 mt-1">Active</div>
-        </Link>
-
-        <Link to="/attendance-analytics" className="block p-6 rounded-xl shadow text-white bg-pink-500 hover:scale-[1.01] transform transition-all" aria-label="Attendance analytics">
-          <div className="text-sm">Avg Attendance</div>
-          <div className="text-2xl font-bold mt-2">{stats.avg_attendance}%</div>
-          <div className="text-xs opacity-75 mt-1">Overall</div>
-        </Link>
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Department Attendance Chart */}
-        <div className="bg-white rounded-xl shadow p-6">
-          <h3 className="text-xl font-semibold mb-4">Department Attendance</h3>
-          <div className="h-64 flex items-end gap-4">
-            {departmentAttendance.length > 0 ? (
-              departmentAttendance.map((dept, idx) => (
-                <div
-                  key={idx}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/manage-departments?dept=${encodeURIComponent(dept.dept)}`)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/manage-departments?dept=${encodeURIComponent(dept.dept)}`); }}
-                  className="flex-1 flex flex-col items-center cursor-pointer"
-                  aria-label={`Open department ${dept.dept}`}>
-                  <div 
-                    className="w-12 bg-gradient-to-t from-blue-500 to-blue-300 rounded-t-lg transition-all hover:from-blue-600 hover:to-blue-400"
-                    style={{ height: `${dept.percent}%` }}
-                    title={`${dept.dept}: ${dept.percent}%`}
-                  ></div>
-                  <div className="text-xs mt-2 text-center truncate w-16">
-                    {dept.dept}
+            {showNotifications && (
+              <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl z-50 border border-gray-200">
+                <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+                  <h3 className="font-semibold text-gray-800">Notifications</h3>
+                  <div className="flex gap-2">
+                    {notificationStats.unread_count > 0 && (
+                      <button onClick={markAllAsRead} className="text-xs text-blue-600 hover:text-blue-800">Mark all read</button>
+                    )}
+                    <button onClick={() => setShowNotifications(false)} className="text-xs text-gray-500 hover:text-gray-700">✕</button>
                   </div>
-                  <div className="text-xs text-gray-500">{dept.percent}%</div>
                 </div>
-              ))
-            ) : (
-              <div className="text-gray-500 text-center w-full">
-                No attendance data available
+
+                <div className="max-h-96 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="p-4 text-center text-gray-500">No notifications</div>
+                  ) : (
+                    notifications.map((notification) => (
+                      <div key={notification.id} onClick={() => handleNotificationClick(notification)} className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${!notification.is_read ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}>
+                        <div className="flex items-start gap-3">
+                          <span className="text-lg mt-1">{getNotificationIcon(notification.type)}</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className={`font-medium ${!notification.is_read ? 'text-blue-900' : 'text-gray-800'}`}>{notification.title}</h4>
+                              {!notification.is_read && (<span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">New</span>)}
+                            </div>
+                            <p className="text-gray-600 text-sm mb-2">{notification.message}</p>
+                            <p className="text-xs text-gray-400">{formatNotificationDate(notification.created_at)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="p-3 border-t border-gray-200 text-center">
+                  <button onClick={() => navigate('/notifications')} className="text-blue-600 hover:text-blue-800 text-sm font-medium">View All Notifications</button>
+                </div>
               </div>
             )}
           </div>
+
+          <button onClick={refreshData} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">🔄 Refresh Data</button>
+        </div>
+      </div>
+
+
+      {/* Top Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        <div
+          onClick={() => navigate("/students")}
+          className="cursor-pointer p-6 rounded-xl shadow text-white bg-blue-500 hover:scale-105 transition-transform"
+        >
+          <div className="text-sm">Total Students</div>
+          <div className="text-2xl font-bold mt-2">{stats.total_students}</div>
+          <div className="text-xs opacity-75 mt-1">From Database</div>
         </div>
 
-        {/* Attendance Distribution */}
-        <div className="bg-white rounded-xl shadow p-6">
-          <h3 className="text-xl font-semibold mb-4">Attendance Distribution</h3>
-          <div className="flex items-center justify-center h-64">
-            <div className="relative">
-              <div className="w-40 h-40 rounded-full bg-gradient-to-r from-green-400 to-blue-500 flex items-center justify-center">
-                <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center">
-                  <span className="text-2xl font-bold">{attendanceDistribution.above_75}%</span>
-                </div>
-              </div>
-            </div>
-            <div className="ml-8">
-              <div className="flex items-center mb-2">
-                <div className="w-4 h-4 bg-green-400 rounded mr-2"></div>
-                <span>Above 75%: {attendanceDistribution.above_75}%</span>
-              </div>
-              <div className="flex items-center">
-                <div className="w-4 h-4 bg-blue-500 rounded mr-2"></div>
-                <span>Below 75%: {attendanceDistribution.below_75}%</span>
-              </div>
-            </div>
+        <div
+          onClick={() => navigate("/teachers")}
+          className="cursor-pointer p-6 rounded-xl shadow text-white bg-green-500 hover:scale-105 transition-transform"
+        >
+          <div className="text-sm">Total Teachers</div>
+          <div className="text-2xl font-bold mt-2">{stats.total_teachers}</div>
+          <div className="text-xs opacity-75 mt-1">Active</div>
+        </div>
+
+        <div
+          onClick={() => navigate("/departments")}
+          className="cursor-pointer p-6 rounded-xl shadow text-white bg-yellow-500 hover:scale-105 transition-transform"
+        >
+          <div className="text-sm">Departments</div>
+          <div className="text-2xl font-bold mt-2">
+            {stats.total_departments}
           </div>
+          <div className="text-xs opacity-75 mt-1">Available</div>
+        </div>
+
+        <div
+          onClick={() => navigate("/courses")}
+          className="cursor-pointer p-6 rounded-xl shadow text-white bg-purple-500 hover:scale-105 transition-transform"
+        >
+          <div className="text-sm">Courses</div>
+          <div className="text-2xl font-bold mt-2">{stats.total_courses}</div>
+          <div className="text-xs opacity-75 mt-1">Active</div>
+        </div>
+
+        <div
+          onClick={() => navigate("/attendance-analytics")}
+          className="cursor-pointer p-6 rounded-xl shadow text-white bg-pink-500 hover:scale-105 transition-transform"
+        >
+          <div className="text-sm">Avg Attendance</div>
+          <div className="text-2xl font-bold mt-2">
+            {stats.avg_attendance}%
+          </div>
+          <div className="text-xs opacity-75 mt-1">Overall</div>
         </div>
       </div>
 
-      {/* Department List */}
-      <div className="bg-white rounded-xl shadow p-6 mb-6">
-        <h3 className="text-xl font-semibold mb-4">📚 Active Departments</h3>
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Department Attendance Chart */}
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <h3 className="text-lg font-semibold mb-4 text-[#132E6B]">
+            Department Attendance
+          </h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={departmentAttendance}>
+              <XAxis dataKey="department" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="percent" fill="#3B82F6" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Attendance Distribution Pie Chart */}
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <h3 className="text-lg font-semibold mb-4 text-[#132E6B]">
+            Attendance Distribution
+          </h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={[
+                  { name: "Above 75%", value: distribution.above_75 || 0 },
+                  { name: "Below 75%", value: distribution.below_75 || 0 },
+                ]}
+                cx="50%"
+                cy="50%"
+                outerRadius={100}
+                dataKey="value"
+                label
+              >
+                <Cell fill="#10B981" />
+                <Cell fill="#3B82F6" />
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Active Departments */}
+      <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+        <h3 className="text-lg font-semibold mb-4 text-[#132E6B]">
+          📚 Active Departments
+        </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            'Computer Science', 'Mathematics', 'Physics', 'Chemistry',
-            'Electrical Engineering', 'Mechanical Engineering', 'Civil Engineering'
-          ].map((dept, index) => (
-            <Link
-              key={index}
-              to={`/manage-departments?dept=${encodeURIComponent(dept)}`}
-              className="block border rounded-lg p-4 hover:shadow-md transition-shadow hover:bg-gray-50"
-              aria-label={`Open ${dept} department`}>
-              <div className="font-semibold text-gray-800">{dept}</div>
-              <div className="text-sm text-gray-500">Active Department</div>
-            </Link>
-          ))}
+          {departmentAttendance.length > 0 ? (
+            departmentAttendance.map((dept, idx) => (
+              <div
+                key={idx}
+                onClick={() =>
+                  navigate(`/department-subjects?dept=${encodeURIComponent(dept.department)}`)
+                }
+                className="cursor-pointer border p-4 rounded-lg hover:shadow-md hover:bg-gray-50 transition"
+              >
+                <div className="font-semibold text-gray-800">
+                  {dept.department}
+                </div>
+                <div className="text-sm text-gray-500">Active Department</div>
+              </div>
+            ))
+          ) : (
+            <div className="text-gray-500">No departments found.</div>
+          )}
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="bg-white p-6 rounded-xl shadow-md">
-        <h3 className="text-xl font-semibold mb-4">Manage Departments & Subjects</h3>
-        <p className="text-gray-700 mb-4">Connected to live database with real-time data.</p>
-        <div className="mt-4">
-          <Link to="/manage-departments" className="px-4 py-2 bg-blue-800 text-white rounded hover:bg-blue-900">
-            Open Manage Departments
-          </Link>
-        </div>
+      {/* Manage Departments Section */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h3 className="text-lg font-semibold mb-3 text-[#132E6B]">
+          Manage Departments & Courses
+        </h3>
+        <p className="text-gray-700 mb-4">
+        </p>
+        <Link
+          to="/manage-departments"
+          className="inline-block px-4 py-2 bg-blue-800 text-white rounded hover:bg-blue-900"
+        >
+          Open Manage Departments
+        </Link>
       </div>
 
-      {/* Status */}
-      <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-        <div className="text-sm text-green-700">
-          ✅ Connected to SmartAttend Database • Last updated: {lastUpdated.toLocaleTimeString()}
-        </div>
-      </div>
+      
     </div>
   );
 }

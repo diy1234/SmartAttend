@@ -232,6 +232,19 @@ function TakeAttendance() {
     stopCamera();
   };
 
+  // Add facial recognition navigation
+  const handleFacialRecognition = () => {
+    navigate('/facial-recognition-attendance', { 
+      state: { 
+        course: course,
+        dept: dept,
+        subject: subject,
+        classId: classId,
+        students: students
+      } 
+    });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6 flex items-center justify-center">
@@ -255,12 +268,20 @@ function TakeAttendance() {
           <p className="text-gray-600 text-sm">Date: {new Date().toDateString()}</p>
           <p className="text-gray-600 text-sm">Total Students: {students.length}</p>
         </div>
-        <button
-          onClick={() => navigate(-1)}
-          className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
-        >
-          ← Back
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleFacialRecognition}
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+          >
+            👤 Facial Recognition
+          </button>
+          <button
+            onClick={() => navigate(-1)}
+            className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
+          >
+            ← Back
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}

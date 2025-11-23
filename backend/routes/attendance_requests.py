@@ -1,3 +1,4 @@
+# attendance_requests.py
 from flask import Blueprint, request, jsonify
 from models.database import get_db_connection
 from datetime import datetime
@@ -5,6 +6,8 @@ from services.notification_service import NotificationService
 
 attendance_requests_bp = Blueprint('attendance_requests', __name__)
 
+
+# TEACHER – GET PENDING REQUESTS
 @attendance_requests_bp.route('/requests', methods=['GET'])
 def get_pending_requests():
     """Get pending attendance requests for a teacher"""
@@ -17,7 +20,6 @@ def get_pending_requests():
     cursor = conn.cursor()
     
     try:
-        # Get pending requests for this teacher - FIXED JOIN to use students table
         cursor.execute('''
             SELECT 
                 ar.id,
@@ -29,24 +31,25 @@ def get_pending_requests():
                 ar.created_at,
                 u.name as student_name,
                 u.email as student_email,
-                s.enrollment_no
+                s.enrollment_no,
+                ar.status
             FROM attendance_requests ar
-            JOIN students s ON ar.student_id = s.id  -- FIXED: Join with students table
-            JOIN users u ON s.user_id = u.id         -- FIXED: Then join with users table
+            JOIN students s ON ar.student_id = s.id
+            JOIN users u ON s.user_id = u.id
             WHERE ar.teacher_id = ? AND ar.status = 'pending'
             ORDER BY ar.created_at DESC
         ''', (teacher_id,))
         
         requests = cursor.fetchall()
-        result = [dict(req) for req in requests]
-        
-        return jsonify(result)
+        return jsonify([dict(r) for r in requests])
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
+
+# STUDENT – CREATE REQUEST
 @attendance_requests_bp.route('/requests', methods=['POST'])
 def create_attendance_request():
     """Create a new attendance request (Student)"""
@@ -61,16 +64,17 @@ def create_attendance_request():
     cursor = conn.cursor()
     
     try:
-        # Check if request already exists for same student, teacher, date, and subject
+        # prevent duplicate pending requests
         cursor.execute('''
             SELECT id FROM attendance_requests 
-            WHERE student_id = ? AND teacher_id = ? AND request_date = ? AND subject = ? AND status = 'pending'
+            WHERE student_id = ? AND teacher_id = ? AND request_date = ? 
+            AND subject = ? AND status = 'pending'
         ''', (data['student_id'], data['teacher_id'], data['request_date'], data['subject']))
         
         if cursor.fetchone():
             return jsonify({'error': 'You already have a pending request for this class and date'}), 400
         
-        # Create new request
+        # create request
         cursor.execute('''
             INSERT INTO attendance_requests 
             (student_id, teacher_id, department, subject, request_date, reason)
@@ -87,8 +91,7 @@ def create_attendance_request():
         conn.commit()
         request_id = cursor.lastrowid
         
-        # 🔔 Send notification to teacher about new attendance request
-        # Get student name for notification
+        # fetch student name
         cursor.execute('''
             SELECT u.name 
             FROM students s 
@@ -98,24 +101,37 @@ def create_attendance_request():
         student = cursor.fetchone()
         student_name = student['name'] if student else 'Student'
         
-        request_data = {
-            'id': request_id,
-            'student_name': student_name,
-            'department': data['department'],
-            'subject': data['subject'],
-            'request_date': data['request_date'],
-            'reason': data.get('reason', '')
-        }
-        
-        # Get teacher user_id for notification
+        # get teacher user_id
         cursor.execute('SELECT user_id FROM teacher_profiles WHERE id = ?', (data['teacher_id'],))
         teacher_profile = cursor.fetchone()
+
+        # -----------------------------------------
+        # 🔵 NOTIFY TEACHER
+        # -----------------------------------------
         if teacher_profile:
             NotificationService.notify_attendance_request(
                 teacher_id=teacher_profile['user_id'],
-                request_data=request_data
+                request_data={
+                    'id': request_id,
+                    'student_name': student_name,
+                    'department': data['department'],
+                    'subject': data['subject'],
+                    'request_date': data['request_date'],
+                    'reason': data.get('reason', '')
+                }
             )
-        
+
+        # -----------------------------------------
+        # 🔴 NEW — NOTIFY ALL ADMINS (inform with related request id)
+        # -----------------------------------------
+        NotificationService.notify_admins(
+            title="New Attendance Request",
+            message=f"{student_name} has submitted an attendance request for {data['subject']} on {data['request_date']}.",
+            notification_type="attendance_request",
+            related_id=request_id
+        )
+        # -----------------------------------------
+
         return jsonify({'message': 'Attendance request submitted successfully'}), 201
         
     except Exception as e:
@@ -124,14 +140,15 @@ def create_attendance_request():
     finally:
         conn.close()
 
+
+# TEACHER – APPROVE (unchanged behavior; marks attendance etc.)
 @attendance_requests_bp.route('/requests/<int:request_id>/approve', methods=['POST'])
 def approve_attendance_request(request_id):
-    """Approve attendance request and mark student as present - ENHANCED VERSION"""
+    """Approve attendance request and mark student as present"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        # Get the request details with all necessary information
         cursor.execute('''
             SELECT 
                 ar.*,
@@ -144,112 +161,86 @@ def approve_attendance_request(request_id):
             WHERE ar.id = ? AND ar.status = 'pending'
         ''', (request_id,))
         
-        request_data = cursor.fetchone()
-        if not request_data:
+        req = cursor.fetchone()
+        if not req:
             return jsonify({'error': 'Request not found or already processed'}), 404
         
-        request_dict = dict(request_data)
-        
-        # Find or create a class for this subject and teacher
+        req = dict(req)
+
+        # CLASS AND ATTENDANCE LOGIC (unchanged)
         cursor.execute('''
             SELECT id FROM classes 
             WHERE teacher_id = ? AND class_name LIKE ?
             LIMIT 1
-        ''', (request_dict['teacher_id'], f"%{request_dict['subject']}%"))
+        ''', (req['teacher_id'], f"%{req['subject']}%"))
         
         class_data = cursor.fetchone()
         
         if not class_data:
-            # Create a class entry if it doesn't exist
             cursor.execute('''
                 INSERT INTO classes (teacher_id, class_name, subject_code, schedule)
                 VALUES (?, ?, ?, 'As per request')
-            ''', (request_dict['teacher_id'], request_dict['subject'], request_dict['subject']))
+            ''', (req['teacher_id'], req['subject'], req['subject']))
             class_id = cursor.lastrowid
         else:
             class_id = class_data['id']
         
-        # Check if student is enrolled in this class, if not enroll them
+        # ensure student is enrolled
         cursor.execute('''
             SELECT id FROM enrollment 
             WHERE student_id = ? AND class_id = ?
-        ''', (request_dict['student_id'], class_id))
+        ''', (req['student_id'], class_id))
         
         if not cursor.fetchone():
             cursor.execute('''
                 INSERT INTO enrollment 
                 (student_id, class_id, subject, department, section, semester, academic_year)
                 VALUES (?, ?, ?, ?, 'A', 1, '2024-2025')
-            ''', (request_dict['student_id'], class_id, request_dict['subject'], request_dict['department']))
+            ''', (req['student_id'], class_id, req['subject'], req['department']))
         
-        # Check if attendance already exists for this student, class, and date
+        # create or update attendance record
         cursor.execute('''
             SELECT id FROM attendance 
             WHERE student_id = ? AND class_id = ? AND attendance_date = ?
-        ''', (request_dict['student_id'], class_id, request_dict['request_date']))
+        ''', (req['student_id'], class_id, req['request_date']))
         
-        existing_attendance = cursor.fetchone()
+        existing = cursor.fetchone()
         
-        if existing_attendance:
-            # Update existing attendance to present
+        if existing:
             cursor.execute('''
                 UPDATE attendance 
-                SET status = 'present', 
-                    marked_by = ?, 
-                    marked_via_request = TRUE, 
-                    request_id = ?, 
-                    subject = ?, 
-                    department = ?,
-                    created_at = CURRENT_TIMESTAMP
+                SET status = 'present', marked_by = ?, marked_via_request = TRUE,
+                    request_id = ?, subject = ?, department = ?, created_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (
-                request_dict['teacher_id'], 
-                request_id, 
-                request_dict['subject'],
-                request_dict['department'],
-                existing_attendance['id']
-            ))
+            ''', (req['teacher_id'], request_id, req['subject'], req['department'], existing['id']))
         else:
-            # Create new attendance record
             cursor.execute('''
                 INSERT INTO attendance 
-                (student_id, class_id, attendance_date, status, marked_by, 
-                 marked_via_request, request_id, subject, department)
+                (student_id, class_id, attendance_date, status, marked_by, marked_via_request, 
+                 request_id, subject, department)
                 VALUES (?, ?, ?, 'present', ?, TRUE, ?, ?, ?)
-            ''', (
-                request_dict['student_id'],
-                class_id,
-                request_dict['request_date'],
-                request_dict['teacher_id'],
-                request_id,
-                request_dict['subject'],
-                request_dict['department']
-            ))
+            ''', (req['student_id'], class_id, req['request_date'], req['teacher_id'], 
+                  request_id, req['subject'], req['department']))
         
-        # Update the request status to approved
+        # mark request approved and record who processed it (teacher)
         cursor.execute('''
             UPDATE attendance_requests 
-            SET status = 'approved', responded_at = CURRENT_TIMESTAMP
+            SET status = 'approved', responded_at = CURRENT_TIMESTAMP,
+                processed_by_role = 'teacher', processed_by_user_id = ?
             WHERE id = ?
-        ''', (request_id,))
+        ''', (req['teacher_id'], request_id))
         
         conn.commit()
-        
-        return jsonify({
-            'message': 'Attendance request approved and student marked as present',
-            'attendance_marked': True,
-            'student_name': request_dict['student_name'],
-            'subject': request_dict['subject'],
-            'date': request_dict['request_date']
-        })
+        return jsonify({'message': 'Request approved'})
         
     except Exception as e:
         conn.rollback()
-        print(f"Error approving request: {str(e)}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
+
+# TEACHER – REJECT
 @attendance_requests_bp.route('/requests/<int:request_id>/reject', methods=['POST'])
 def reject_attendance_request(request_id):
     """Reject attendance request"""
@@ -257,36 +248,31 @@ def reject_attendance_request(request_id):
     cursor = conn.cursor()
     
     try:
-        # Get request details for response message
         cursor.execute('''
-            SELECT ar.*, u.name as student_name
+            SELECT ar.*, tp.id as teacher_id
             FROM attendance_requests ar
-            JOIN students s ON ar.student_id = s.id
-            JOIN users u ON s.user_id = u.id
+            JOIN teacher_profiles tp ON ar.teacher_id = tp.id
             WHERE ar.id = ? AND ar.status = 'pending'
         ''', (request_id,))
         
-        request_data = cursor.fetchone()
-        if not request_data:
-            return jsonify({'error': 'Request not found or already processed'}), 404
+        req = cursor.fetchone()
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
         
-        request_dict = dict(request_data)
-        
-        # Update the request status to rejected
+        req = dict(req)
+
         cursor.execute('''
             UPDATE attendance_requests 
-            SET status = 'rejected', responded_at = CURRENT_TIMESTAMP
+            SET status = 'rejected',
+                responded_at = CURRENT_TIMESTAMP,
+                processed_by_role = 'teacher',
+                processed_by_user_id = ?
             WHERE id = ?
-        ''', (request_id,))
+        ''', (req['teacher_id'], request_id))
         
         conn.commit()
         
-        return jsonify({
-            'message': 'Attendance request rejected',
-            'student_name': request_dict['student_name'],
-            'subject': request_dict['subject'],
-            'date': request_dict['request_date']
-        })
+        return jsonify({'message': 'Attendance request rejected'})
         
     except Exception as e:
         conn.rollback()
@@ -294,9 +280,10 @@ def reject_attendance_request(request_id):
     finally:
         conn.close()
 
+
+# STUDENT – GET THEIR OWN REQUEST HISTORY
 @attendance_requests_bp.route('/requests/student/<int:student_id>', methods=['GET'])
 def get_student_requests(student_id):
-    """Get attendance request history for a student"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -307,55 +294,205 @@ def get_student_requests(student_id):
                 tp.full_name as teacher_name,
                 u.email as teacher_email
             FROM attendance_requests ar
-            JOIN teacher_profiles tp ON ar.teacher_id = tp.id  -- FIXED: Join with teacher_profiles
+            JOIN teacher_profiles tp ON ar.teacher_id = tp.id
             JOIN users u ON tp.user_id = u.id
             WHERE ar.student_id = ?
             ORDER BY ar.created_at DESC
         ''', (student_id,))
         
         requests = cursor.fetchall()
-        result = [dict(req) for req in requests]
-        
-        return jsonify(result)
+        return jsonify([dict(r) for r in requests])
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
+
+# TEACHER – STATS
 @attendance_requests_bp.route('/requests/stats/<int:teacher_id>', methods=['GET'])
 def get_request_stats(teacher_id):
-    """Get statistics for attendance requests"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        # Get counts by status
         cursor.execute('''
-            SELECT 
-                status,
-                COUNT(*) as count
+            SELECT status, COUNT(*) as count
             FROM attendance_requests 
             WHERE teacher_id = ?
             GROUP BY status
         ''', (teacher_id,))
         
-        stats = cursor.fetchall()
-        result = {stat['status']: stat['count'] for stat in stats}
+        stats = {row['status']: row['count'] for row in cursor.fetchall()}
         
-        # Get today's pending requests
         cursor.execute('''
             SELECT COUNT(*) as count 
             FROM attendance_requests 
             WHERE teacher_id = ? AND status = 'pending' AND request_date = DATE('now')
         ''', (teacher_id,))
         
-        today_pending = cursor.fetchone()['count']
-        result['today_pending'] = today_pending
+        stats['today_pending'] = cursor.fetchone()['count']
         
-        return jsonify(result)
+        return jsonify(stats)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ADMIN – GET ONLY PENDING REQUESTS (kept so admin can view pending)
+@attendance_requests_bp.route('/requests/admin/pending', methods=['GET'])
+def admin_get_pending_requests():
+    """Admin: Get only pending requests"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            SELECT 
+                ar.id,
+                ar.student_id,
+                u.name AS student_name,
+                s.enrollment_no,
+                ar.teacher_id,
+                tp.full_name AS teacher_name,
+                ar.department,
+                ar.subject,
+                ar.request_date,
+                ar.reason,
+                ar.status,
+                ar.created_at
+            FROM attendance_requests ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN users u ON s.user_id = u.id
+            JOIN teacher_profiles tp ON ar.teacher_id = tp.id
+            WHERE ar.status = 'pending'
+            ORDER BY ar.created_at DESC
+        ''')
+
+        return jsonify([dict(r) for r in cursor.fetchall()])
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ADMIN – APPROVE (records processed_by info using admin_user_id from body)
+@attendance_requests_bp.route('/requests/admin/<int:request_id>/approve', methods=['POST'])
+def admin_approve_only(request_id):
+    """Admin approval — does NOT mark attendance, only updates status."""
+    data = request.json or {}
+    admin_user_id = data.get("admin_user_id")
+
+    if not admin_user_id:
+        return jsonify({"error": "Admin user ID required"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            UPDATE attendance_requests
+            SET status = 'approved',
+                responded_at = CURRENT_TIMESTAMP,
+                processed_by_role = 'admin',
+                processed_by_user_id = ?
+            WHERE id = ? AND status = 'pending'
+        ''', (admin_user_id, request_id))
+
+        conn.commit()
+        return jsonify({'message': 'Request approved by admin'})
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ADMIN – REJECT
+@attendance_requests_bp.route('/requests/admin/<int:request_id>/reject', methods=['POST'])
+def admin_reject_only(request_id):
+    """Admin rejection — does NOT touch attendance table."""
+    data = request.json or {}
+    admin_user_id = data.get("admin_user_id")
+
+    if not admin_user_id:
+        return jsonify({"error": "Admin user ID required"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            UPDATE attendance_requests
+            SET status = 'rejected',
+                responded_at = CURRENT_TIMESTAMP,
+                processed_by_role = 'admin',
+                processed_by_user_id = ?
+            WHERE id = ? AND status = 'pending'
+        ''', (admin_user_id, request_id))
+
+        conn.commit()
+        return jsonify({'message': 'Request rejected by admin'})
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@attendance_requests_bp.route('/requests/processed', methods=['GET'])
+def get_processed_requests():
+    role = request.args.get('role')
+    teacher_id = request.args.get('teacher_id')
+    student_id = request.args.get('student_id')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Base query
+        query = '''
+            SELECT 
+                ar.*,
+                u.name AS student_name,
+                s.enrollment_no,
+                tp.full_name AS teacher_name,
+                u2.name AS processed_by_name
+            FROM attendance_requests ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN users u ON s.user_id = u.id
+            JOIN teacher_profiles tp ON ar.teacher_id = tp.id
+            LEFT JOIN users u2 ON ar.processed_by_user_id = u2.id
+            WHERE ar.status IN ('approved', 'rejected')
+        '''
+        
+        params = []
+
+        # If role filtering applies
+        if role == 'student' and student_id:
+            query += " AND ar.student_id = ?"
+            params.append(student_id)
+
+        elif role == 'teacher' and teacher_id:
+            # T2 OPTION — teacher sees all processed
+            pass  
+
+        elif role == 'admin':
+            pass  # admin sees everything
+
+        query += " ORDER BY ar.responded_at DESC"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        return jsonify([dict(row) for row in rows])
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
     finally:
         conn.close()

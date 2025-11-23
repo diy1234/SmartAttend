@@ -53,6 +53,7 @@ def get_notifications():
     finally:
         conn.close()
 
+
 @notifications_bp.route('/notifications/<int:notification_id>/read', methods=['POST'])
 def mark_as_read(notification_id):
     """Mark a notification as read"""

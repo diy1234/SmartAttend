@@ -7,7 +7,7 @@ teacher_dashboard_bp = Blueprint('teacher_dashboard', __name__)
 
 @teacher_dashboard_bp.route('/my-courses', methods=['GET'])
 def get_teacher_courses():
-    """Get all courses for a teacher with proper department info"""
+    """Get all courses for a teacher with proper course and subject info"""
     try:
         # Get teacher ID from query parameter
         teacher_id = request.args.get('teacher_id')
@@ -28,19 +28,51 @@ def get_teacher_courses():
         
         teacher_profile_id = teacher_profile['id']
         
-        # Get classes assigned to this teacher with proper enrollment information
+        # Get classes assigned to this teacher with proper course and subject information
         cursor.execute('''
             SELECT 
                 c.id as id,
-                c.class_name as subject,
+                c.class_name,
                 c.subject_code,
                 c.schedule,
-                COALESCE(e.department, 'Computer Science') as department,
-                COUNT(DISTINCT e.student_id) as student_count
+                -- Get the primary course from enrolled students
+                COALESCE(
+                    (SELECT DISTINCT s.course 
+                     FROM enrollment e 
+                     JOIN students s ON e.student_id = s.id 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'General'
+                ) as course,
+                -- Get the primary subject from enrollments
+                COALESCE(
+                    (SELECT DISTINCT e.subject 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    c.class_name
+                ) as subject,
+                -- Get department
+                COALESCE(
+                    (SELECT DISTINCT e.department 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'Computer Science'
+                ) as department,
+                COUNT(DISTINCT e.student_id) as student_count,
+                -- Get room from class_schedules if available
+                COALESCE(
+                    (SELECT cs.room_number 
+                     FROM class_schedules cs 
+                     WHERE cs.teacher_id = c.teacher_id 
+                     LIMIT 1),
+                    'TBA'
+                ) as room
             FROM classes c
             LEFT JOIN enrollment e ON c.id = e.class_id
             WHERE c.teacher_id = ?
-            GROUP BY c.id, c.class_name, c.subject_code, c.schedule, e.department
+            GROUP BY c.id, c.class_name, c.subject_code, c.schedule
             ORDER BY c.class_name
         ''', (teacher_profile_id,))
         
@@ -51,11 +83,13 @@ def get_teacher_courses():
         for cls in classes:
             formatted_courses.append({
                 'id': cls['id'],
-                'subject': cls['subject'],
+                'class_name': cls['class_name'],
+                'course': cls['course'],  # BCA, BBA, MBA, etc.
+                'subject': cls['subject'],  # Data Structures, Principles of Management, etc.
                 'subject_code': cls['subject_code'],
                 'schedule': cls['schedule'] or 'Not scheduled',
                 'department': cls['department'],
-                'room': 'TBA',
+                'room': cls['room'],
                 'student_count': cls['student_count']
             })
         
@@ -63,7 +97,7 @@ def get_teacher_courses():
         
         print(f"📚 Returning {len(formatted_courses)} courses for teacher {teacher_id}")
         for course in formatted_courses:
-            print(f"  - {course['subject']} ({course['department']}) - {course['student_count']} students")
+            print(f"  - Course: {course['course']}, Subject: {course['subject']}, Students: {course['student_count']}")
         
         return jsonify({
             'courses': formatted_courses,
@@ -136,13 +170,38 @@ def get_course_students(class_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get class details
+        # Get class details with course and subject info
         cursor.execute('''
             SELECT 
                 c.id,
-                c.class_name as subject,
+                c.class_name,
                 c.subject_code,
-                c.teacher_id
+                c.teacher_id,
+                -- Get course from enrolled students
+                COALESCE(
+                    (SELECT DISTINCT s.course 
+                     FROM enrollment e 
+                     JOIN students s ON e.student_id = s.id 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'General'
+                ) as course,
+                -- Get subject from enrollments
+                COALESCE(
+                    (SELECT DISTINCT e.subject 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    c.class_name
+                ) as subject,
+                -- Get department
+                COALESCE(
+                    (SELECT DISTINCT e.department 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'Computer Science'
+                ) as department
             FROM classes c
             WHERE c.id = ?
         ''', (class_id,))
@@ -214,10 +273,11 @@ def get_course_students(class_id):
         return jsonify({
             'course': {
                 'id': course['id'],
-                'name': course['subject'],
-                'subject': course['subject'],
+                'class_name': course['class_name'],
+                'course': course['course'],  # BCA, BBA, MBA, etc.
+                'subject': course['subject'],  # Data Structures, Principles of Management, etc.
                 'subject_code': course['subject_code'],
-                'department': 'Computer Science',
+                'department': course['department'],
                 'teacher_name': teacher_name
             },
             'students': formatted_students,
@@ -237,12 +297,27 @@ def get_course_attendance(class_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get course details
+        # Get course details with course and subject info
         cursor.execute('''
             SELECT 
                 c.class_name,
                 c.subject_code,
-                c.teacher_id
+                c.teacher_id,
+                COALESCE(
+                    (SELECT DISTINCT s.course 
+                     FROM enrollment e 
+                     JOIN students s ON e.student_id = s.id 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'General'
+                ) as course,
+                COALESCE(
+                    (SELECT DISTINCT e.subject 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    c.class_name
+                ) as subject
             FROM classes c
             WHERE c.id = ?
         ''', (class_id,))
@@ -304,6 +379,8 @@ def get_course_attendance(class_id):
         return jsonify({
             'course': {
                 'name': course['class_name'],
+                'course': course['course'],
+                'subject': course['subject'],
                 'subject_code': course['subject_code'],
                 'teacher_name': teacher_name
             },
@@ -332,30 +409,58 @@ def mark_attendance():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get teacher profile ID
-        cursor.execute('SELECT id FROM teacher_profiles WHERE user_id = ?', (marked_by,))
+        # Get teacher profile ID (if exists) and ensure we use the teacher's user ID
+        cursor.execute('SELECT id, user_id FROM teacher_profiles WHERE user_id = ?', (marked_by,))
         teacher_profile = cursor.fetchone()
-        
+
         if not teacher_profile:
-            conn.close()
-            return jsonify({'error': 'Teacher profile not found'}), 404
+            # If no teacher profile exists, still allow marking using the teacher user ID
+            teacher_profile_id = None
+            teacher_user_id = marked_by
+        else:
+            teacher_profile_id = teacher_profile['id']
+            teacher_user_id = teacher_profile['user_id']
         
-        teacher_profile_id = teacher_profile['id']
+        # Get class details with course and subject info
+        cursor.execute('''
+            SELECT 
+                c.class_name,
+                c.subject_code,
+                COALESCE(
+                    (SELECT DISTINCT s.course 
+                     FROM enrollment e 
+                     JOIN students s ON e.student_id = s.id 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'General'
+                ) as course,
+                COALESCE(
+                    (SELECT DISTINCT e.subject 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    c.class_name
+                ) as subject,
+                COALESCE(
+                    (SELECT DISTINCT e.department 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'Computer Science'
+                ) as department
+            FROM classes c
+            WHERE c.id = ?
+        ''', (class_id,))
         
-        # Get class details to get subject and department
-        cursor.execute('SELECT class_name, subject_code FROM classes WHERE id = ?', (class_id,))
         class_info = cursor.fetchone()
         
         if not class_info:
             conn.close()
             return jsonify({'error': 'Class not found'}), 404
         
-        subject = class_info['class_name']
-        
-        # Get department from enrollment
-        cursor.execute('SELECT department FROM enrollment WHERE class_id = ? LIMIT 1', (class_id,))
-        dept_result = cursor.fetchone()
-        department = dept_result['department'] if dept_result else 'Computer Science'
+        subject = class_info['subject']
+        course = class_info['course']
+        department = class_info['department']
         
         # Mark attendance for each student
         success_count = 0
@@ -379,19 +484,19 @@ def mark_attendance():
                 existing = cursor.fetchone()
                 
                 if existing:
-                    # Update existing attendance
+                    # Update existing attendance (store the teacher's user id in marked_by)
                     cursor.execute('''
                         UPDATE attendance 
                         SET status = ?, marked_by = ?, created_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    ''', (status, teacher_profile_id, existing['id']))
+                    ''', (status, teacher_user_id, existing['id']))
                 else:
                     # Insert new attendance
                     cursor.execute('''
                         INSERT INTO attendance 
-                        (student_id, class_id, attendance_date, status, marked_by, subject, department)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ''', (student_id, class_id, attendance_date, status, teacher_profile_id, subject, department))
+                        (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (student_id, class_id, attendance_date, status, teacher_user_id, subject, department, course))
                 
                 success_count += 1
                 
@@ -422,12 +527,27 @@ def get_attendance_summary(class_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get course details
+        # Get course details with course and subject info
         cursor.execute('''
             SELECT 
                 c.class_name,
                 c.subject_code,
-                c.teacher_id
+                c.teacher_id,
+                COALESCE(
+                    (SELECT DISTINCT s.course 
+                     FROM enrollment e 
+                     JOIN students s ON e.student_id = s.id 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    'General'
+                ) as course,
+                COALESCE(
+                    (SELECT DISTINCT e.subject 
+                     FROM enrollment e 
+                     WHERE e.class_id = c.id 
+                     LIMIT 1),
+                    c.class_name
+                ) as subject
             FROM classes c
             WHERE c.id = ?
         ''', (class_id,))
@@ -462,6 +582,7 @@ def get_attendance_summary(class_id):
                 s.id as student_id,
                 u.name as student_name,
                 s.enrollment_no,
+                s.course as student_course,
                 COUNT(a.id) as total_attended,
                 SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present_count,
                 CASE 
@@ -474,7 +595,7 @@ def get_attendance_summary(class_id):
             JOIN users u ON s.user_id = u.id
             LEFT JOIN attendance a ON e.student_id = a.student_id AND a.class_id = e.class_id
             WHERE e.class_id = ?
-            GROUP BY s.id, u.name, s.enrollment_no
+            GROUP BY s.id, u.name, s.enrollment_no, s.course
             ORDER BY attendance_percentage DESC
         ''', (class_id,))
         
@@ -492,6 +613,8 @@ def get_attendance_summary(class_id):
         return jsonify({
             'course': {
                 'name': course['class_name'],
+                'course': course['course'],
+                'subject': course['subject'],
                 'subject_code': course['subject_code'],
                 'teacher_name': teacher_name
             },
@@ -503,6 +626,7 @@ def get_attendance_summary(class_id):
                     'student_id': row['student_id'],
                     'student_name': row['student_name'],
                     'enrollment_no': row['enrollment_no'],
+                    'course': row['student_course'],
                     'total_attended': row['total_attended'],
                     'present_count': row['present_count'],
                     'attendance_percentage': row['attendance_percentage']
@@ -513,6 +637,8 @@ def get_attendance_summary(class_id):
     except Exception as e:
         print(f"Error in get_attendance_summary: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+# ... (Keep the rest of the functions the same: get_weekly_schedule, get_pending_requests, update_request_status, get_pending_requests_count)
 
 @teacher_dashboard_bp.route('/weekly-schedule', methods=['GET'])
 def get_weekly_schedule():

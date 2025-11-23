@@ -51,6 +51,21 @@ class NotificationService:
             related_id=request_data.get('id')
         )
     
+        @staticmethod
+        def notify_teacher_subject_assignment(teacher_user_id, assignment_data):
+            """Notify teacher about new subject assignment"""
+            title = "New Subject Assignment"
+            message = f"You have been assigned to teach {assignment_data['subject_name']} in {assignment_data['department_name']}"
+        
+            return NotificationService.create_notification(
+                user_id=teacher_user_id,
+                title=title,
+                message=message,
+                notification_type='alert',
+                related_id=assignment_data.get('id')
+            )
+    
+    
     @staticmethod
     def notify_system_alert(teacher_id, title, message):
         """Send system alert to teacher"""
@@ -83,6 +98,35 @@ class NotificationService:
         finally:
             conn.close()
     
+    @staticmethod
+    def notify_admins(title, message, notification_type="system", related_id=None):
+        """Notify all admins by creating a notification per-admin using create_notification
+
+        Uses the central `create_notification` so format, related_id, and created_at
+        are handled consistently with other notification creators.
+        """
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT id FROM users WHERE role = 'admin'")
+            admins = cursor.fetchall()
+
+            for admin in admins:
+                NotificationService.create_notification(
+                    user_id=admin['id'],
+                    title=title,
+                    message=message,
+                    notification_type=notification_type,
+                    related_id=related_id
+                )
+
+        except Exception as e:
+            print(f"Error notifying admins: {e}")
+        finally:
+            conn.close()
+
+
     @staticmethod
     def mark_notification_as_read(notification_id):
         """Mark a notification as read"""

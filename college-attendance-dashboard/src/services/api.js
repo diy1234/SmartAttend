@@ -1,70 +1,207 @@
-// src/services/api.js
-import axios from 'axios';
+// =============================================
+//  UNIFIED API LAYER (AXIOS VERSION)
+//  Used for Admin, Teacher, Student dashboards
+// =============================================
+import axios from "axios";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:5000/api';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || "http://127.0.0.1:5000/api";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 10000,
+  headers: { "Content-Type": "application/json" },
+  timeout: 15000,
 });
 
-// Common API functions
-export const getAttendances = async (params = {}) => {
-  const response = await api.get('/attendance', { params });
-  return response.data?.attendance || response.data;
-};
-
-export const getUserProfile = async (userId) => {
-  const response = await api.get(`/users/profile?user_id=${userId}`);
-  return response.data;
-};
-
-export const markAttendanceSingle = async (data) => {
-  const response = await api.post('/attendance', data);
-  return response.data;
-};
-
-export const getClasses = async () => {
-  const response = await api.get('/classes');
-  return response.data?.classes || response.data;
-};
-
-export { api };
-export default api;
-
-// Request interceptor
+// ============ AUTH TOKEN HANDLING ============
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+    const token = localStorage.getItem("token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
     console.log(`🔄 API Call: ${config.method?.toUpperCase()} ${config.url}`);
     return config;
   },
+  (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (response) => {
+    console.log(`✅ API ${response.status}: ${response.config.url}`);
+    return response;
+  },
   (error) => {
-    console.error('❌ API Request Error:', error);
+    console.error(
+      "❌ API Error:",
+      error.response?.data || error.message
+    );
+
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.location.href = "/login";
+    }
+
     return Promise.reject(error);
   }
 );
 
-// Response interceptor
-api.interceptors.response.use(
-  (response) => {
-    console.log(`✅ API Response: ${response.status} ${response.config.url}`);
-    return response;
-  },
-  (error) => {
-    console.error('❌ API Response Error:', error.response?.data || error.message);
-    
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
-  }
-);
+// =====================================================
+//  AUTH
+// =====================================================
+export const login = (data) => api.post("/auth/login", data).then((r) => r.data);
+export const signup = (data) =>
+  api.post("/auth/signup", data).then((r) => r.data);
+export const getUserProfile = (userId) =>
+  api.get(`/users/profile?user_id=${userId}`).then((r) => r.data);
+
+// =====================================================
+//  ATTENDANCE (Teacher + Student + Admin)
+// =====================================================
+export const getAttendances = (params) =>
+  api.get("/attendance", { params }).then((r) => r.data.attendance || r.data);
+
+export const markAttendanceSingle = (data) =>
+  api.post("/attendance", data).then((r) => r.data);
+
+// =====================================================
+//  CLASSES
+// =====================================================
+export const getClasses = () =>
+  api.get("/classes").then((r) => r.data.classes || r.data);
+
+// =====================================================
+//  ATTENDANCE REQUESTS (Student → Teacher/Admin)
+// =====================================================
+export const getPendingRequests = (teacherId) =>
+  api
+    .get(`/attendance-requests/requests?teacher_id=${teacherId}`)
+    .then((r) => r.data);
+
+export const approveAttendanceRequest = (requestId, processor) =>
+  api
+    .post(
+      `/attendance-requests/requests/${requestId}/approve`,
+      processor || {}
+    )
+    .then((r) => r.data);
+
+export const rejectAttendanceRequest = (requestId, processor) =>
+  api
+    .post(`/attendance-requests/requests/${requestId}/reject`, processor || {})
+    .then((r) => r.data);
+
+// =====================================================
+//  ADMIN — PROCESSED REQUESTS (for AttendanceHistory.js)
+// =====================================================
+export const getProcessedAttendanceRequests = (params) =>
+  api
+    .get(`/attendance-history/processed`, { params })
+    .then((r) => r.data || []);
+
+// =====================================================
+//  DEPARTMENTS
+// =====================================================
+export const getDepartments = () =>
+  api.get("/departments/").then((r) => r.data);
+
+export const createDepartment = (data) =>
+  api.post("/departments/add", data).then((r) => r.data);
+
+export const updateDepartment = (id, data) =>
+  api.put(`/departments/${id}`, data).then((r) => r.data);
+
+export const deleteDepartment = (deptName) =>
+  api.post("/departments/remove", { name: deptName }).then((r) => r.data);
+
+// =====================================================
+//  SUBJECTS
+// =====================================================
+export const getSubjects = (departmentId = "") =>
+  api
+    .get(`/subjects/${departmentId ? `?department_id=${departmentId}` : ""}`)
+    .then((r) => r.data);
+
+export const createSubject = (deptName, subjectName) =>
+  api.post(`/departments/${deptName}/subjects/add`, { subject: subjectName }).then((r) => r.data);
+
+export const updateSubject = (id, data) =>
+  api.put(`/subjects/${id}`, data).then((r) => r.data);
+
+export const deleteSubject = (deptName, subjectName) =>
+  api.post(`/departments/${deptName}/subjects/remove`, { subject: subjectName }).then((r) => r.data);
+
+// assign teacher → subject
+
+
+export const assignTeacherToSubject = (teacher_id, subject_id, department_id) =>
+  api.post('/teacher-subjects', { teacher_id, subject_id, department_id }).then((r) => r.data);
+
+export const getTeacherSubjects = (teacher_id) =>
+  api.get(`/teacher-subjects/teacher/${teacher_id}`).then((r) => r.data);
+
+export const removeTeacherSubject = (assignment_id) =>
+  api.delete(`/teacher-subjects/${assignment_id}`).then((r) => r.data);
+// =====================================================
+//  TEACHERS LIST (needed for ManageSubjects + WeeklySchedule)
+// =====================================================
+export const getTeacherProfiles = () =>
+  api.get("/admin/teachers").then((r) => r.data);
+
+// =====================================================
+//  WEEKLY SCHEDULE (Classroom-based timetable)
+// =====================================================
+export const listSchedules = (params) =>
+  api.get("/schedules/schedules", { params }).then((r) => r.data);
+
+export const createSchedule = (data) =>
+  api.post("/schedules/schedules", data).then((r) => r.data);
+
+export const updateSchedule = (id, data) =>
+  api.put(`/schedules/schedules/${id}`, data).then((r) => r.data);
+
+export const deleteSchedule = (id) =>
+  api.delete(`/schedules/schedules/${id}`).then((r) => r.data);
+
+export const getScheduleForClass = (classId) =>
+  api.get(`/schedules/schedules/class/${classId}`).then((r) => r.data);
+
+// =====================================================
+// Export default for compatibility with old imports
+// =====================================================
+export default {
+  api,
+  login,
+  signup,
+  getUserProfile,
+  getAttendances,
+  markAttendanceSingle,
+  getClasses,
+
+  getPendingRequests,
+  approveAttendanceRequest,
+  rejectAttendanceRequest,
+  getProcessedAttendanceRequests,
+
+  getDepartments,
+  createDepartment,
+  updateDepartment,
+  deleteDepartment,
+
+  getSubjects,
+  createSubject,
+  updateSubject,
+  deleteSubject,
+  assignTeacherToSubject,
+
+  getTeacherSubjects,
+  removeTeacherSubject,
+  getTeacherProfiles,
+
+  listSchedules,
+  createSchedule,
+  updateSchedule,
+  deleteSchedule,
+  getScheduleForClass,
+};
+
+export { api };

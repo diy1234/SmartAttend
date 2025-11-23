@@ -1,306 +1,668 @@
-import React, { useContext, useState } from "react";
-import { Link } from 'react-router-dom';
-import DataContext from '../context/DataContext';
-import slugify from '../utils/slugify';
-import ConfirmModal from '../components/ConfirmModal';
+// src/pages/ManageDepartments.js
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import slugify from "../utils/slugify";
+import api from "../services/api";
 
-export default function ManageDepartments(){
-  const { departments, addDepartment, removeDepartment, addSubject, removeSubject, addTeacherAssignment, addEnrollment, weeklySchedule, addWeeklyEntry, removeWeeklyEntry, teacherAssignments, enrollments, setWeeklyScheduleForTeacher } = useContext(DataContext);
+/*
+  Backend-connected ManageDepartments WITH ROOM NUMBER SUPPORT.
+*/
 
-  const [newDept, setNewDept] = useState('');
-  const [newSubject, setNewSubject] = useState({ dept: '', subject: ''});
-  const [newAssignment, setNewAssignment] = useState({ teacher: '', dept: '', subject: ''});
-  const [newEnrollment, setNewEnrollment] = useState({ student: '', dept: '', subject: ''});
-  const [newScheduleDay, setNewScheduleDay] = useState('');
-  const [newScheduleStart, setNewScheduleStart] = useState('');
-  const [newScheduleEnd, setNewScheduleEnd] = useState('');
+export default function ManageDepartments() {
+  // backend-backed state
+  const [departments, setDepartments] = useState([]);
+  const [weeklySchedule, setWeeklySchedule] = useState([]);
+  const [teachers, setTeachers] = useState([]);
 
-  // confirm modal state
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmPayload, setConfirmPayload] = useState(null);
+  // local input states
+  const [newDept, setNewDept] = useState("");
+  const [newSubject, setNewSubject] = useState({ dept: "", subject: "" });
+  const [newAssignment, setNewAssignment] = useState({
+    teacher: "",
+    dept: "",
+    subject: ""
+  });
 
-  const openConfirm = (type, meta) => {
-    setConfirmPayload({ type, meta });
-    setConfirmOpen(true);
-  };
+  const [newScheduleDay, setNewScheduleDay] = useState("");
+  const [newScheduleStart, setNewScheduleStart] = useState("");
+  const [newScheduleEnd, setNewScheduleEnd] = useState("");
+  const [newRoomNumber, setNewRoomNumber] = useState(""); // ✅ ADDED
 
-  // Fallback native confirm handlers (reliable across environments)
-  const handleRemoveSubjectClick = (deptName, subj) => {
-    if (window.confirm(`Remove subject "${subj}" from ${deptName}?`)) {
-      removeSubject(deptName, subj);
-    }
-  };
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const handleRemoveDepartmentClick = (deptName) => {
-    if (window.confirm(`Remove department "${deptName}" and all its subjects?`)) {
-      removeDepartment(deptName);
-    }
-  };
-
-  const handleConfirm = () => {
-    if(!confirmPayload) return setConfirmOpen(false);
-    const { type, meta } = confirmPayload;
-    if(type === 'remove-subject'){
-      removeSubject(meta.dept, meta.subject);
-    } else if(type === 'remove-department'){
-      removeDepartment(meta.dept);
-    }
-    setConfirmPayload(null);
-    setConfirmOpen(false);
-  };
-  const handleCancel = () => { setConfirmPayload(null); setConfirmOpen(false); };
-
-  // Predefined time slots (5 slots, 40 minutes each, 20 minute lunch after slot 3)
+  // Time slots
   const TIME_SLOTS = [
-    { start: '08:30', end: '09:10' },
-    { start: '09:15', end: '09:55' },
-    { start: '10:00', end: '10:40' },
-    // 20 min lunch break here
-    { start: '11:00', end: '11:40' },
-    { start: '11:45', end: '12:25' },
+    { start: "08:30", end: "09:10" },
+    { start: "09:15", end: "09:55" },
+    { start: "10:00", end: "10:40" },
+    { start: "11:00", end: "11:40" },
+    { start: "11:45", end: "12:25" }
   ];
 
-  // Assign schedule using the first available time slot for the teacher on that day
-  const handleAddSchedule = () => {
-    if(!newAssignment.teacher || !newAssignment.dept || !newAssignment.subject || !newScheduleDay) return alert('Please fill all schedule fields');
-    const entriesForTeacherDay = (weeklySchedule || []).filter(s => s.teacher === newAssignment.teacher && s.day === newScheduleDay);
-    if(entriesForTeacherDay.length >= TIME_SLOTS.length){
-      return alert('This teacher already has the maximum number of subjects for ' + newScheduleDay + '. Remove one before adding.');
-    }
-    // pick chosen slot if provided, otherwise first available
-    const usedEntries = entriesForTeacherDay || [];
-    const toMinutes = (t) => {
-      if(!t) return null;
-      const [h,m] = t.split(':');
-      return parseInt(h,10)*60 + parseInt(m,10);
-    };
+  // helper: convert "12:00 PM" or "12:00 AM" style to "HH:MM" 24-hour
+function convertTo24Hour(time) {
+  if (!time) return time;
+  // if already in 24-hour format (HH:MM without AM/PM), return as-is
+  if (!/AM|PM/i.test(time)) {
+    return time.trim();
+  }
 
-    // if admin provided start/end explicitly, use them (validate)
-    let timeStr = '';
-    if(newScheduleStart || newScheduleEnd){
-      if(!newScheduleStart || !newScheduleEnd) return alert('Please provide both start and end times or leave both empty to auto-select');
-      if(newScheduleStart >= newScheduleEnd) return alert('Start time must be before end time');
-      const startMin = toMinutes(newScheduleStart);
-      const endMin = toMinutes(newScheduleEnd);
-      // check overlap with existing entries for this teacher/day
-      for(const e of usedEntries){
-        const parts = (e.time || '').split('-').map(p => p.trim());
-        if(parts.length !== 2) continue;
-        const es = toMinutes(parts[0]);
-        const ee = toMinutes(parts[1]);
-        if(es == null || ee == null) continue;
-        // overlap if start < ee && es < end
-        if(startMin < ee && es < endMin){
-          return alert('Provided time overlaps an existing slot for this teacher on that day: ' + e.time);
-        }
-      }
-      timeStr = `${newScheduleStart} - ${newScheduleEnd}`;
-    } else {
-      // auto-pick first available slot from TIME_SLOTS
-      const usedTimes = new Set(usedEntries.map(e => e.time));
-      const slotIdx = TIME_SLOTS.findIndex(ts => !usedTimes.has(`${ts.start} - ${ts.end}`));
-      if(slotIdx === -1) return alert('No available time slot');
-      timeStr = `${TIME_SLOTS[slotIdx].start} - ${TIME_SLOTS[slotIdx].end}`;
-    }
+  const parts = time.trim().split(' ');
+  // time like "12:00" and modifier "PM"
+  if (parts.length === 2) {
+    const [timePart, modifier] = parts;
+    let [hours, minutes] = timePart.split(':');
+    hours = parseInt(hours, 10);
+    const mod = modifier.toUpperCase();
+    if (mod === 'PM' && hours !== 12) hours = hours + 12;
+    if (mod === 'AM' && hours === 12) hours = 0;
+    // pad
+    const hh = String(hours).padStart(2, '0');
+    const mm = (minutes || '00').padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  return time.trim();
+}
 
-    addWeeklyEntry({ teacher: newAssignment.teacher, dept: newAssignment.dept, subject: newAssignment.subject, day: newScheduleDay, time: timeStr });
-    setNewScheduleDay(''); setNewAssignment({ teacher: '', dept: '', subject: '' }); setNewScheduleStart(''); setNewScheduleEnd('');
+
+  // =============================
+  // Load departments, schedules, teachers
+  // =============================
+  useEffect(() => {
+    reloadAll();
+  }, []);
+
+  async function reloadAll() {
+    await Promise.all([
+      reloadDepartments(),
+      reloadSchedules(),
+      reloadTeachers()
+    ]);
+  }
+
+  async function reloadDepartments() {
+    try {
+      const deps = await api.getDepartments();
+      const normalized = (Array.isArray(deps) ? deps : []).map((d) => ({
+        ...d,
+        subjects: (d.subjects || []).map((s) =>
+          typeof s === "string"
+            ? { id: null, name: s }
+            : { id: s.id ?? null, name: s.name ?? s }
+        )
+      }));
+      setDepartments(normalized);
+    } catch (err) {
+      console.error("Load departments failed", err);
+      setDepartments([]);
+    }
+  }
+
+  async function reloadSchedules() {
+    try {
+      const resp = await api.api.get("/schedules/schedules");
+      setWeeklySchedule(Array.isArray(resp.data) ? resp.data : []);
+    } catch (err) {
+      console.error("Load schedules failed", err);
+      setWeeklySchedule([]);
+    }
+  }
+
+  async function reloadTeachers() {
+    try {
+      const resp = await api.api.get("/admin/teachers");
+      setTeachers(Array.isArray(resp.data) ? resp.data : []);
+    } catch (err) {
+      console.error("Load teachers failed", err);
+      setTeachers([]);
+    }
+  }
+
+  // =========================
+  // Departments
+  // =========================
+  const handleAddDepartment = async () => {
+    if (!newDept.trim()) return;
+    setActionLoading(true);
+    try {
+      await api.createDepartment({ name: newDept.trim() });
+      setNewDept("");
+      await reloadDepartments();
+      alert("Department added");
+    } catch (err) {
+      alert(err.message || "Failed to add department");
+    } finally {
+      setActionLoading(false);
+    }
   };
 
+  const handleRemoveDepartmentClick = async (dept) => {
+    if (!dept?.name)
+      return alert("Department name is required to delete.");
+    if (!window.confirm(`Delete ${dept.name}?`)) return;
+
+    try {
+      await api.deleteDepartment(dept.name);
+      await reloadDepartments();
+      alert("Department deleted");
+    } catch (err) {
+      alert(err.message || "Failed to delete department");
+    }
+  };
+
+  // =========================
+  // Subjects
+  // =========================
+  const handleAddSubject = async (dept, subjectName) => {
+    if (!subjectName || !dept) return;
+
+    if (!dept.name) return alert("Department name is required.");
+
+    try {
+      await api.createSubject(dept.name, subjectName.trim());
+      setNewSubject({ dept: "", subject: "" });
+      await reloadDepartments();
+      alert("Subject added");
+    } catch (err) {
+      alert(err.message || "Failed to create subject");
+    }
+  };
+
+  const handleRemoveSubjectClick = async (dept, subj) => {
+    if (!subj?.name) return alert("Subject name is required");
+    if (!dept?.name) return alert("Department name is required");
+    if (!window.confirm(`Delete subject ${subj.name}?`)) return;
+
+    try {
+      await api.deleteSubject(dept.name, subj.name);
+      await reloadDepartments();
+      alert("Subject deleted");
+    } catch (err) {
+      alert(err.message || "Failed to delete subject");
+    }
+  };
+
+  // =========================
+  // Add SCHEDULE (Teacher assignment)
+  // =========================
+  const handleAddSchedule = async () => {
+    if (
+      !newAssignment.teacher ||
+      !newAssignment.dept ||
+      !newAssignment.subject ||
+      !newScheduleDay
+    )
+      return alert("Fill all fields");
+
+    try {
+      // teacher
+      let teacherObj = teachers.find(
+        (t) =>
+          t.email === newAssignment.teacher ||
+          t.user_email === newAssignment.teacher ||
+          t.id === newAssignment.teacher
+      );
+      if (!teacherObj) return alert("Teacher not found");
+
+      // dept
+      const deptObj = departments.find(
+        (d) => d.name === newAssignment.dept || d.id === newAssignment.dept
+      );
+      const departmentId = deptObj?.id;
+      if (!departmentId) return alert("Department not found");
+
+      // subject
+      const subjObj = deptObj.subjects.find(
+        (s) =>
+          s.name === newAssignment.subject ||
+          s.id === newAssignment.subject
+      );
+      const subjectId = subjObj?.id;
+      if (!subjectId) return alert("Subject not in department");
+
+      // time selection:
+      let timeStr = "";
+      if (newScheduleStart && newScheduleEnd) {
+        if (newScheduleStart >= newScheduleEnd)
+          return alert("Start must be before end");
+        timeStr = `${newScheduleStart} - ${newScheduleEnd}`;
+      } else {
+        // auto slot
+        const used = new Set(
+          weeklySchedule
+            .filter((s) => s.teacher_id === teacherObj.id && s.day === newScheduleDay)
+            .map((s) => s.time)
+        );
+        const slot = TIME_SLOTS.find(
+          (ts) => !used.has(`${ts.start} - ${ts.end}`)
+        );
+        if (!slot) return alert("No available slot");
+        timeStr = `${slot.start} - ${slot.end}`;
+      }
+
+      let [startPart, endPart] = timeStr.split("-").map((x) => x.trim());
+      startPart = convertTo24Hour(startPart);
+      endPart = convertTo24Hour(endPart);
+
+      // PAYLOAD INCLUDING ROOM NUMBER
+      const payload = {
+        teacher_id: teacherObj.user_id || teacherObj.id,
+        department_id: departmentId,
+        subject_id: subjectId,
+        day_of_week: newScheduleDay,
+        start_time: startPart,
+        end_time: endPart,
+        room_number: newRoomNumber.trim() || null, // ✅ ROOM NUMBER INCLUDED
+        created_by: 1 
+      };
+
+      await api.createSchedule(payload);
+
+      // reset
+      setNewAssignment({ teacher: "", dept: "", subject: "" });
+      setNewScheduleDay("");
+      setNewScheduleStart("");
+      setNewScheduleEnd("");
+      setNewRoomNumber(""); // clear room input
+
+      reloadSchedules();
+      reloadDepartments();
+      alert("Schedule added");
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "Failed to add schedule");
+    }
+  };
+
+  // =========================
+  // Delete schedule
+  // =========================
+  const removeWeeklyEntry = async (id) => {
+    if (!window.confirm("Delete schedule?")) return;
+    try {
+      await api.deleteSchedule(id);
+      await reloadSchedules();
+      alert("Schedule deleted");
+    } catch (err) {
+      alert(err.message || "Delete failed");
+    }
+  };
+
+  const handleSimpleAssign = async () => {
+  if (!newAssignment.teacher || !newAssignment.dept || !newAssignment.subject) {
+    return alert("Please fill all fields");
+  }
+
+  setActionLoading(true);
+
+  try {
+    // find teacher object
+    let teacherObj = teachers.find(
+      (t) =>
+        t.email === newAssignment.teacher ||
+        t.user_email === newAssignment.teacher ||
+        t.full_name === newAssignment.teacher ||
+        t.id === newAssignment.teacher
+    );
+
+    if (!teacherObj) {
+      // try backend again
+      const resp = await api.api.get("/admin/teachers");
+      const list = Array.isArray(resp.data) ? resp.data : [];
+      teacherObj = list.find((t) => t.email === newAssignment.teacher || t.id === newAssignment.teacher);
+    }
+
+    if (!teacherObj) {
+      setActionLoading(false);
+      return alert("Teacher not found.");
+    }
+
+    // find department id
+    const deptObj = departments.find(
+      (d) => d.name === newAssignment.dept || d.id === newAssignment.dept
+    );
+    if (!deptObj) {
+      setActionLoading(false);
+      return alert("Department not found.");
+    }
+
+    // find subject id
+    const subjObj = deptObj.subjects.find(
+      (s) => s.name === newAssignment.subject || s.id === newAssignment.subject
+    );
+    if (!subjObj) {
+      setActionLoading(false);
+      return alert("Subject not found.");
+    }
+
+    // ✨ NEW API CALL — insert into teacher_subjects table
+        await api.assignTeacherToSubject(
+          teacherObj.id,
+          subjObj.id,
+          deptObj.id
+        );
+
+    alert("Teacher assigned to subject successfully!");
+    setNewAssignment({ teacher: "", dept: "", subject: "" });
+  } catch (err) {
+    console.error("Simple assign failed", err);
+    alert(err.message || "Failed to assign");
+  } finally {
+    setActionLoading(false);
+  }
+};
+
+
+  // =========================
+  // Render
+  // =========================
   return (
     <div className="p-6">
-      <ConfirmModal
-        open={confirmOpen}
-        title={confirmPayload?.type === 'remove-department' ? 'Remove Department' : 'Remove Subject'}
-        message={confirmPayload?.type === 'remove-department' ? `Remove department "${confirmPayload?.meta?.dept}" and all its subjects?` : `Remove subject "${confirmPayload?.meta?.subject}" from ${confirmPayload?.meta?.dept}?`}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-      />
+      <h2 className="text-3xl font-bold text-[#132E6B] mb-6">
+        Manage Departments & Subjects
+      </h2>
 
-      <h2 className="text-3xl font-bold text-[#132E6B] mb-6">Manage Departments & Subjects</h2>
-
-      {/* Weekly Schedule Management */}
+      {/* Weekly Schedule UI */}
       <div className="bg-white p-6 rounded-xl shadow-md mb-6">
-        <h3 className="text-xl font-semibold mb-4">Weekly Schedule Management (max 5 subjects/day per teacher)</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 mb-3 items-center">
+        <h3 className="text-xl font-semibold mb-4">
+          Weekly Schedule Management (with Room Number)
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-3 mb-3 items-center">
+
+          {/* Teacher */}
           <input
             placeholder="Teacher email"
             value={newAssignment.teacher}
-            onChange={(e)=>setNewAssignment(s=>({...s, teacher: e.target.value}))}
+            onChange={(e) =>
+              setNewAssignment({ ...newAssignment, teacher: e.target.value })
+            }
             className="border p-2 rounded w-full md:col-span-2"
           />
 
+          {/* Dept */}
           <select
             value={newAssignment.dept}
-            onChange={(e)=>setNewAssignment(s=>({...s, dept: e.target.value}))}
+            onChange={(e) =>
+              setNewAssignment({ ...newAssignment, dept: e.target.value })
+            }
             className="border p-2 rounded w-full"
           >
             <option value="">Select dept</option>
-            {departments.map(d=> <option key={d.name} value={d.name}>{d.name}</option>)}
+            {departments.map((d) => (
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
+            ))}
           </select>
 
+          {/* Subject */}
           <select
             value={newAssignment.subject}
-            onChange={(e)=>setNewAssignment(s=>({...s, subject: e.target.value}))}
+            onChange={(e) =>
+              setNewAssignment({ ...newAssignment, subject: e.target.value })
+            }
             className="border p-2 rounded w-full"
           >
             <option value="">Select subject</option>
-            {(departments.find(d=>d.name===newAssignment.dept)?.subjects || []).map(s=> <option key={s} value={s}>{s}</option>)}
+            {(departments.find((d) => d.name === newAssignment.dept)?.subjects ||
+              []
+            ).map((s) => (
+              <option key={s.id} value={s.name}>
+                {s.name}
+              </option>
+            ))}
           </select>
 
+          {/* Day */}
           <select
             value={newScheduleDay}
-            onChange={(e)=>setNewScheduleDay(e.target.value)}
+            onChange={(e) => setNewScheduleDay(e.target.value)}
             className="border p-2 rounded w-full"
           >
             <option value="">Day</option>
-            {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=> <option key={d} value={d}>{d}</option>)}
+            {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map(
+              (d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              )
+            )}
           </select>
 
-          <div className="flex items-center gap-3 md:justify-end md:col-span-1">
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-600">Start</label>
-              <input type="time" value={newScheduleStart} onChange={(e)=>{ setNewScheduleStart(e.target.value); }} className="border p-1 rounded w-28" />
-            </div>
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-600">End</label>
-              <input type="time" value={newScheduleEnd} onChange={(e)=>{ setNewScheduleEnd(e.target.value); }} className="border p-1 rounded w-28" />
-            </div>
+          {/* Time + Room */}
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-600">Start</label>
+            <input
+              type="time"
+              value={newScheduleStart}
+              onChange={(e) => setNewScheduleStart(e.target.value)}
+              className="border p-1 rounded w-28"
+            />
           </div>
 
-          <div className="md:col-span-6 text-sm text-gray-500">(Leave both empty to auto-select the first available slot)</div>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={handleAddSchedule} className="px-3 py-1 bg-green-600 text-white rounded">Add Schedule</button>
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-600">End</label>
+            <input
+              type="time"
+              value={newScheduleEnd}
+              onChange={(e) => setNewScheduleEnd(e.target.value)}
+              className="border p-1 rounded w-28"
+            />
+          </div>
         </div>
 
-        <div className="mt-4">
+        {/* ROOM INPUT */}
+        <div className="mt-3 mb-3">
+          <label className="text-xs text-gray-600">Room Number (optional)</label>
+          <input
+            type="text"
+            placeholder="e.g., 101"
+            value={newRoomNumber}
+            onChange={(e) => setNewRoomNumber(e.target.value)}
+            className="border p-2 rounded w-48"
+          />
+        </div>
+
+        <button
+          onClick={handleAddSchedule}
+          className="px-3 py-1 bg-green-600 text-white rounded"
+        >
+          Add Schedule
+        </button>
+
+        {/* SCHEDULE LIST */}
+        <div className="mt-6">
           <h4 className="font-medium mb-2">Current Weekly Schedule</h4>
-          {(!weeklySchedule || weeklySchedule.length === 0) ? <p className="text-gray-600">No schedule entries.</p> : (
-            <div className="space-y-2">
-              {weeklySchedule.map((s) => (
-                <div key={s.id} className="flex justify-between items-center bg-gray-50 p-2 rounded">
-                  <div className="text-sm">{s.teacher} — {s.day}: {s.dept} / {s.subject} — {s.time}</div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={()=>{ if(window.confirm('Remove this schedule entry?')) removeWeeklyEntry(s.id); }} className="text-red-600">Remove</button>
-                  </div>
-                </div>
-              ))}
-
-              {/* Publish per-teacher: list unique teachers and allow publishing their schedule to their dashboard */}
-              <div className="mt-4">
-                <h5 className="font-medium mb-2">Publish Schedule to Teacher Dashboards</h5>
-                {Array.from(new Set((weeklySchedule || []).map(s => s.teacher))).map((teacherEmail) => (
-                  <div key={teacherEmail} className="flex items-center justify-between bg-white p-2 rounded mb-2">
-                    <div className="text-sm">{teacherEmail}</div>
-                    <div className="flex gap-2">
-                      <button onClick={() => {
-                        const entries = (weeklySchedule || []).filter(s => s.teacher === teacherEmail).map(s => ({ day: s.day, dept: s.dept, subject: s.subject, time: s.time }));
-                        if(entries.length === 0) return alert('No schedule entries for this teacher');
-                        if(window.confirm(`Publish ${entries.length} schedule entries to ${teacherEmail}'s dashboard?`)){
-                          setWeeklyScheduleForTeacher(teacherEmail, entries);
-                          alert('Schedule published to teacher dashboard');
-                        }
-                      }} className="px-3 py-1 bg-green-600 text-white rounded">Push to Teacher</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          {weeklySchedule.length === 0 ? (
+            <p>No schedule entries.</p>
+          ) : (
+            <div className="overflow-x-auto bg-white rounded-md border">
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Day</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Time</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Teacher</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Department</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Subject</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Room</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y">
+                  {weeklySchedule.map((s, idx) => (
+                    <tr key={s.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="px-4 py-3 text-sm text-gray-800">{s.day_of_week}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{s.start_time} - {s.end_time}</td>
+                      <td className="px-4 py-3 text-sm text-gray-800">{s.teacher_email || s.teacher_id}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{s.department_name || s.dept}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{s.subject_name || '—'}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {s.room_number ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-xs">Room {s.room_number}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm">
+                        <button
+                          onClick={() => removeWeeklyEntry(s.id)}
+                          className="inline-flex items-center px-3 py-1 border border-red-200 text-red-700 rounded-md hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
       </div>
 
-      {/* Departments Section */}
+      {/* Departments + Subjects UI */}
       <div className="space-y-10">
         {departments.map((dept) => (
-          <div key={dept.name}>
-            <h3 className="text-2xl font-semibold text-[#132E6B] mb-4">
-              {dept.name} Department
-            </h3>
+          <div key={dept.id}>
+            <h3 className="text-2xl font-semibold">{dept.name} Department</h3>
 
-            {/* Subject Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mt-2">
               {dept.subjects.map((subj) => (
-                <div key={subj} className="bg-white rounded-xl shadow-md p-5 border border-gray-200 transition">
-                  <h4 className="text-lg font-semibold text-gray-800 mb-2">{subj}</h4>
+                <div
+                  key={subj.id}
+                  className="bg-white rounded-xl shadow-md p-5 border"
+                >
+                  <h4 className="text-lg font-semibold">{subj.name}</h4>
+
                   <div className="flex gap-2 mt-2">
-                    <Link to={`/departments/${slugify(dept.name)}/${slugify(subj)}`} className="text-blue-700 underline">View</Link>
-                    <button onClick={() => handleRemoveSubjectClick(dept.name, subj)} className="text-red-600">Remove</button>
+                    <Link
+                      to={`/departments/${slugify(dept.name)}/${slugify(
+                        subj.name
+                      )}`}
+                      className="text-blue-700 underline"
+                    >
+                      View
+                    </Link>
+
+                    <button
+                      onClick={() => handleRemoveSubjectClick(dept, subj)}
+                      className="text-red-600"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Add subject UI */}
+            {/* Add subject */}
             <div className="mt-4 flex gap-2">
-              <input value={newSubject.subject} onChange={(e)=>setNewSubject(s=>({...s, subject: e.target.value}))} placeholder="New subject name" className="border p-2 rounded" />
-              <button onClick={()=>{ if(newSubject.subject) { addSubject(dept.name, newSubject.subject); setNewSubject(s=>({...s, subject: ''})); } }} className="px-3 py-1 bg-green-600 text-white rounded">Add Subject</button>
+              <input
+                value={newSubject.subject}
+                onChange={(e) =>
+                  setNewSubject({ ...newSubject, subject: e.target.value })
+                }
+                placeholder="New subject"
+                className="border p-2 rounded"
+              />
+              <button
+                onClick={() =>
+                  newSubject.subject &&
+                  handleAddSubject(dept, newSubject.subject)
+                }
+                className="px-3 py-1 bg-green-600 text-white rounded"
+              >
+                Add Subject
+              </button>
             </div>
-            <div className="mt-3">
-              <button onClick={() => handleRemoveDepartmentClick(dept.name)} className="px-3 py-1 bg-red-600 text-white rounded">Remove Department</button>
-            </div>
+
+            <button
+              onClick={() => handleRemoveDepartmentClick(dept)}
+              className="mt-3 px-3 py-1 bg-red-600 text-white rounded"
+            >
+              Remove Department
+            </button>
           </div>
         ))}
 
-        {/* Assignments & Enrollments UI */}
-        <div className="bg-white p-4 rounded shadow-md">
-          <h4 className="font-semibold mb-2">Assign Teacher to Subject</h4>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-            <input placeholder="Teacher email" value={newAssignment.teacher} onChange={(e)=>setNewAssignment(s=>({...s, teacher: e.target.value}))} className="border p-2 rounded" />
-            <select value={newAssignment.dept} onChange={(e)=>setNewAssignment(s=>({...s, dept: e.target.value}))} className="border p-2 rounded">
-              <option value="">Select dept</option>
-              {departments.map(d=> <option key={d.name} value={d.name}>{d.name}</option>)}
-            </select>
-            <select value={newAssignment.subject} onChange={(e)=>setNewAssignment(s=>({...s, subject: e.target.value}))} className="border p-2 rounded">
-              <option value="">Select subject</option>
-              {(departments.find(d=>d.name===newAssignment.dept)?.subjects || []).map(s=> <option key={s} value={s}>{s}</option>)}
-            </select>
-            <button onClick={()=>{ if(newAssignment.teacher && newAssignment.dept && newAssignment.subject){ addTeacherAssignment(newAssignment.teacher, newAssignment.dept, newAssignment.subject); setNewAssignment({teacher:'',dept:'',subject:''}); } }} className="px-3 py-1 bg-green-600 text-white rounded">Assign</button>
-          </div>
-
-          {/* Enroll Student UI and assignments/enrollments list removed per request */}
-        </div>
-
-        {/* Add Department UI */}
+        {/* Add Department */}
         <div className="bg-white p-4 rounded shadow-md">
           <h4 className="font-semibold mb-2">Add Department</h4>
           <div className="flex gap-2">
-            <input value={newDept} onChange={(e)=>setNewDept(e.target.value)} placeholder="Department name" className="border p-2 rounded" />
-            <button onClick={()=>{ if(newDept) { addDepartment(newDept); setNewDept(''); } }} className="px-3 py-1 bg-blue-800 text-white rounded">Add</button>
+            <input
+              value={newDept}
+              onChange={(e) => setNewDept(e.target.value)}
+              placeholder="Department name"
+              className="border p-2 rounded"
+            />
+            <button
+              onClick={handleAddDepartment}
+              className="px-3 py-1 bg-blue-800 text-white rounded"
+            >
+              Add
+            </button>
           </div>
+
+          {/* Assign Teacher to Subject (Simple — adds row to teacher_subjects table only) */}
+<div className="bg-white p-4 rounded shadow-md mt-6">
+  <h4 className="font-semibold mb-2">Assign Teacher to Subject</h4>
+
+  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+    <div>
+      <label className="text-xs text-gray-600">Teacher email / id</label>
+      <input
+        placeholder="Teacher email or id"
+        value={newAssignment.teacher}
+        onChange={(e) => setNewAssignment((s) => ({ ...s, teacher: e.target.value }))}
+        className="border p-2 rounded w-full"
+      />
+    </div>
+
+    <div>
+      <label className="text-xs text-gray-600">Department</label>
+      <select
+        value={newAssignment.dept}
+        onChange={(e) => setNewAssignment((s) => ({ ...s, dept: e.target.value }))}
+        className="border p-2 rounded w-full"
+      >
+        <option value="">Select dept</option>
+        {departments.map((d) => (
+          <option key={d.id || d.name} value={d.name}>{d.name}</option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label className="text-xs text-gray-600">Subject</label>
+      <select
+        value={newAssignment.subject}
+        onChange={(e) => setNewAssignment((s) => ({ ...s, subject: e.target.value }))}
+        className="border p-2 rounded w-full"
+      >
+        <option value="">Select subject</option>
+        {(departments.find((d) => d.name === newAssignment.dept)?.subjects || []).map((s) => (
+          <option key={s.id || s.name} value={s.name}>{s.name}</option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <button
+        onClick={handleSimpleAssign}
+        className="px-3 py-1 bg-green-600 text-white rounded"
+      >
+        Assign
+      </button>
+    </div>
+  </div>
+
+</div>
+
+
         </div>
       </div>
     </div>
-  );
-}
-
-function AssignmentsList({ teacherAssignments }){
-  const { removeTeacherAssignment } = useContext(DataContext);
-  if(!teacherAssignments || teacherAssignments.length === 0) return <p className="text-gray-600">No assignments yet.</p>;
-  return (
-    <ul className="mt-2 space-y-1 text-sm">
-      {teacherAssignments.map((a, idx) => (
-        <li key={idx} className="flex justify-between items-center">
-          <div>{a.teacher} — {a.dept} / {a.subject}</div>
-          <button onClick={()=>{ if(window.confirm('Remove this assignment?')) removeTeacherAssignment(a.teacher, a.dept, a.subject); }} className="text-red-600">Remove</button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function EnrollmentsList({ enrollments }){
-  const { removeEnrollment } = useContext(DataContext);
-  if(!enrollments || enrollments.length === 0) return <p className="text-gray-600">No enrollments yet.</p>;
-  return (
-    <ul className="mt-2 space-y-1 text-sm">
-      {enrollments.map((e, idx) => (
-        <li key={idx} className="flex justify-between items-center">
-          <div>{e.student} — {e.dept} / {e.subject}</div>
-          <button onClick={()=>{ if(window.confirm('Remove this enrollment?')) removeEnrollment(e.student, e.dept, e.subject); }} className="text-red-600">Remove</button>
-        </li>
-      ))}
-    </ul>
   );
 }

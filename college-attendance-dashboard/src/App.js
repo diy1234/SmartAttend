@@ -6,6 +6,7 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+
 import Navbar from "./components/Navbar";
 import Sidebar from "./components/Sidebar";
 import Footer from "./components/Footer";
@@ -33,6 +34,7 @@ import TakeAttendance from "./pages/TakeAttendance";
 import TeacherApplyLeave from "./pages/TeacherApplyLeave";
 import TeacherFacialAttendance from './pages/TeacherFacialAttendance';
 import FaceRegistration from './pages/FaceRegistration';
+import FacialRecognitionAttendance from './pages/FacialRecognitionAttendance'; // ADD THIS IMPORT
 import MyRequests from './pages/MyRequests';
 import ManageDepartments from './pages/ManageDepartments';
 import AttendanceAnalytics from './pages/AttendanceAnalytics';
@@ -41,6 +43,12 @@ import { DataProvider } from "./context/DataContext";
 import { ToastProvider } from './context/ToastContext';
 import ToastContainer from './components/ToastContainer';
 import Notifications from './pages/Notifications';
+
+import StudentList from "./pages/StudentList";
+import TeacherList from "./pages/TeacherList";
+import DepartmentList from "./pages/DepartmentList";
+import CourseList from "./pages/CourseList";
+import DepartmentSubjects from "./pages/DepartmentSubjects";
 
 // Protected route
 function ProtectedRoute({ children, allowedRoles }) {
@@ -102,12 +110,18 @@ function App() {
                   <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+                  <Route path="/students" element={<ProtectedRoute allowedRoles={["admin"]}><StudentList /></ProtectedRoute>} />
+                  <Route path="/teachers" element={<ProtectedRoute allowedRoles={["admin"]}><TeacherList /></ProtectedRoute>} />
+                  <Route path="/departments" element={<ProtectedRoute allowedRoles={["admin"]}><DepartmentList /></ProtectedRoute>} />
+                  <Route path="/department-subjects" element={<ProtectedRoute allowedRoles={["admin"]}><DepartmentSubjects /></ProtectedRoute>} />
+                  <Route path="/courses" element={<ProtectedRoute allowedRoles={["admin"]}><CourseList /></ProtectedRoute>} />
                   <Route path="/teacher-dashboard" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherDashboard /></ProtectedRoute>} />
                   <Route path="/teacher-about" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherAboutMe /></ProtectedRoute>} />
                   <Route path="/student-dashboard" element={<ProtectedRoute allowedRoles={["student"]}><StudentDashboard /></ProtectedRoute>} />
                   <Route path="/student-attendance" element={<ProtectedRoute allowedRoles={["student"]}><StudentAttendance /></ProtectedRoute>} />
                   <Route path="/attendance-analytics" element={<ProtectedRoute allowedRoles={["teacher"]}><AttendanceAnalytics /></ProtectedRoute>} />
-                    <Route path="/face-registration" element={<ProtectedRoute allowedRoles={["student"]}><FaceRegistration /></ProtectedRoute>} />
+                  <Route path="/face-registration" element={<ProtectedRoute allowedRoles={["student"]}><FaceRegistration /></ProtectedRoute>} />
+                  <Route path="/facial-recognition-attendance" element={<ProtectedRoute allowedRoles={["teacher"]}><FacialRecognitionAttendance /></ProtectedRoute>} /> {/* ADD THIS ROUTE */}
                   <Route path="/attendance-history" element={<ProtectedRoute allowedRoles={["student","admin"]}><AttendanceHistory /></ProtectedRoute>} />
                   <Route path="/student-profile" element={<ProtectedRoute allowedRoles={["student"]}><StudentProfile /></ProtectedRoute>} />
                   <Route path="/reset-password" element={<ResetPassword />} />
@@ -119,9 +133,8 @@ function App() {
                   <Route path="/my-requests" element={<ProtectedRoute allowedRoles={["student"]}><MyRequests /></ProtectedRoute>} />
                   <Route path="/take-attendance" element={<ProtectedRoute><TakeAttendance /></ProtectedRoute>} />
                   <Route path="/teacher-face" element={<ProtectedRoute allowedRoles={["teacher"]}><TeacherFacialAttendance /></ProtectedRoute>} />
-                  <Route path="/face-registration" element={<ProtectedRoute allowedRoles={["student"]}><FaceRegistration /></ProtectedRoute>} />
                   <Route path="/notifications" element={<Notifications />} />
-                  <Route path="/admin-profile" element={<ProtectedRoute><AdminProfile /></ProtectedRoute>} />
+                  <Route path="/admin-profile" element={<ProtectedRoute allowedRoles={["admin"]}><AdminProfile /></ProtectedRoute>} />
                   <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
                   <Route path="/departments/:dept/:subject" element={<ProtectedRoute><SubjectDetails /></ProtectedRoute>} />
                   <Route path="/about" element={<About />} />

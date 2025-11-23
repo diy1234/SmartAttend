@@ -2,6 +2,7 @@ import sqlite3
 import hashlib
 import os
 
+
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -79,6 +80,8 @@ def init_db():
             class_name TEXT NOT NULL,
             subject_code TEXT,
             schedule TEXT,
+            room TEXT,
+            department TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (teacher_id) REFERENCES teacher_profiles (id)
         )
@@ -110,6 +113,7 @@ def init_db():
             class_id INTEGER NOT NULL,
             subject TEXT NOT NULL,
             department TEXT,
+            course TEXT,
             attendance_date DATE NOT NULL,
             status TEXT NOT NULL CHECK(status IN ('present', 'absent')),
             method TEXT,
@@ -189,10 +193,13 @@ def init_db():
         status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         responded_at TIMESTAMP,
-        FOREIGN KEY (student_id) REFERENCES students (id),  -- Changed from users to students
-        FOREIGN KEY (teacher_id) REFERENCES teacher_profiles (id)  -- Changed from users to teacher_profiles
+        processed_by_role TEXT,             -- NEW
+        processed_by_user_id INTEGER,       -- NEW
+        FOREIGN KEY (student_id) REFERENCES students (id),
+        FOREIGN KEY (teacher_id) REFERENCES teacher_profiles (id),
+        FOREIGN KEY (processed_by_user_id) REFERENCES users (id)
     )
-''')
+    ''')
     
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS notifications (
@@ -207,13 +214,43 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
 ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS teacher_subjects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        teacher_id INTEGER NOT NULL,       -- references teacher_profiles.id
+        subject_id INTEGER NOT NULL,       -- references subjects.id
+        department_id INTEGER,             -- optional, references departments.id
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (teacher_id) REFERENCES teacher_profiles(id),
+        FOREIGN KEY (subject_id) REFERENCES subjects(id),
+        FOREIGN KEY (department_id) REFERENCES departments(id),
+        UNIQUE (teacher_id, subject_id)
+    )
+''')
+    
+
     
     cursor.execute('PRAGMA table_info(attendance)')
     attendance_columns = [col[1] for col in cursor.fetchall()]
     if 'request_id' not in attendance_columns:
         cursor.execute('ALTER TABLE attendance ADD COLUMN request_id INTEGER')
         cursor.execute('ALTER TABLE attendance ADD COLUMN marked_via_request BOOLEAN DEFAULT FALSE')
-    
+   
+    cursor.execute('PRAGMA table_info(class_schedules)')
+    cs_cols = [c[1] for c in cursor.fetchall()]
+    if 'class_id' not in cs_cols:
+        cursor.execute('ALTER TABLE class_schedules ADD COLUMN class_id INTEGER')
+
+
+    cursor.execute("PRAGMA table_info(attendance_requests)")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    if 'processed_by_role' not in columns:
+        cursor.execute("ALTER TABLE attendance_requests ADD COLUMN processed_by_role TEXT")
+
+    if 'processed_by_user_id' not in columns:
+        cursor.execute("ALTER TABLE attendance_requests ADD COLUMN processed_by_user_id INTEGER")
+
     # ========== AUTOMATIC DATA TRANSFER: Users to Teacher Profiles ==========
     print("🔄 Checking for existing teachers without profiles...")
     
@@ -279,7 +316,8 @@ def init_db():
             ('Chemistry',),
             ('Electrical Engineering',),
             ('Mechanical Engineering',),
-            ('Civil Engineering',)
+            ('Civil Engineering',),
+            ('Economics',)
         ]
         cursor.executemany('INSERT INTO departments (name) VALUES (?)', sample_departments)
         
@@ -289,6 +327,9 @@ def init_db():
             ('Algorithms', 1),
             ('Database Systems', 1),
             ('Web Development', 1),
+            ('Advanced Data Structures', 1),
+            ('SQL and Database Design', 1),
+            ('Frontend Development', 1),
             ('Calculus', 2),
             ('Linear Algebra', 2),
             ('Differential Equations', 2),
@@ -299,7 +340,8 @@ def init_db():
             ('Circuit Analysis', 5),
             ('Digital Electronics', 5),
             ('Strength of Materials', 6),
-            ('Fluid Mechanics', 7)
+            ('Fluid Mechanics', 7),
+            ('Business Economics', 8)
         ]
         cursor.executemany('INSERT INTO subjects (name, department_id) VALUES (?, ?)', sample_subjects)
         print("✅ Sample departments and subjects inserted")
@@ -350,6 +392,7 @@ def init_db():
                 ("Student Three", "student3@smartattend.com", "S003", "BCA", 3, "1234567892"),
                 ("Student Four", "student4@smartattend.com", "S004", "BCA", 3, "1234567893"),
                 ("Student Five", "student5@smartattend.com", "S005", "BCA", 3, "1234567894"),
+                ("Student Six", "student6@smartattend.com", "S006", "BBA", 2, "1234567895"),
             ]
             
             student_ids = []
@@ -369,32 +412,37 @@ def init_db():
                 )
                 student_ids.append(cursor.lastrowid)
             
-            print("✅ 5 sample students created with password: student123")
+            print("✅ 6 sample students created with password: student123")
         
         # Create sample classes for the teacher if teacher exists
         if teacher_profile_id:
-            # Create sample classes
+            # Create sample classes with PROPER SUBJECT NAMES
             sample_classes = [
-                (teacher_profile_id, 'BCA - Data Structures', 'CS201', 'Mon, Wed, Fri - 10:00 AM'),
-                (teacher_profile_id, 'BCA - Database Systems', 'CS202', 'Tue, Thu - 2:00 PM'),
-                (teacher_profile_id, 'Web Development', 'CS301', 'Mon, Wed - 11:00 AM')
+                (teacher_profile_id, 'Database Systems', 'CS101', 'Mon, Wed - 11:00 AM', 'Room 101', 'Computer Science'),
+                (teacher_profile_id, 'Data Structures', 'CS102', 'Mon, Wed, Fri - 10:00 AM', 'Room 101', 'Computer Science'),
+                (teacher_profile_id, 'Advanced Data Structures', 'CS201', 'As per request', 'Room 101', 'Computer Science'),
+                (teacher_profile_id, 'Business Economics', 'ECO201', 'Tue, Thu - 2:00 PM', 'Room 101', 'Economics'),
+                (teacher_profile_id, 'SQL and Database Design', 'CS301', 'As per request', 'Room 101', 'Computer Science'),
+                (teacher_profile_id, 'Frontend Development', 'CS302', 'As per request', 'Room 101', 'Computer Science')
             ]
             
             class_ids = []
             for class_data in sample_classes:
                 cursor.execute(
-                    'INSERT INTO classes (teacher_id, class_name, subject_code, schedule) VALUES (?, ?, ?, ?)',
+                    'INSERT INTO classes (teacher_id, class_name, subject_code, schedule, room, department) VALUES (?, ?, ?, ?, ?, ?)',
                     class_data
                 )
                 class_ids.append(cursor.lastrowid)
+            
+            print("✅ 6 sample classes created with proper subject names")
             
             # Create sample class schedules
             sample_schedules = [
                 (teacher_profile_id, 1, 1, 'Monday', '10:00', '11:00', 'Room 101', teacher_user_id if 'teacher_user_id' in locals() else 1),
                 (teacher_profile_id, 1, 2, 'Wednesday', '10:00', '11:00', 'Room 101', teacher_user_id if 'teacher_user_id' in locals() else 1),
                 (teacher_profile_id, 1, 3, 'Friday', '10:00', '11:00', 'Room 101', teacher_user_id if 'teacher_user_id' in locals() else 1),
-                (teacher_profile_id, 1, 4, 'Tuesday', '14:00', '15:30', 'Lab 201', teacher_user_id if 'teacher_user_id' in locals() else 1),
-                (teacher_profile_id, 1, 4, 'Thursday', '14:00', '15:30', 'Lab 201', teacher_user_id if 'teacher_user_id' in locals() else 1)
+                (teacher_profile_id, 8, 19, 'Tuesday', '14:00', '15:30', 'Room 101', teacher_user_id if 'teacher_user_id' in locals() else 1),
+                (teacher_profile_id, 8, 19, 'Thursday', '14:00', '15:30', 'Room 101', teacher_user_id if 'teacher_user_id' in locals() else 1)
             ]
             
             for schedule in sample_schedules:
@@ -403,27 +451,72 @@ def init_db():
                     schedule
                 )
             
-            print("✅ 3 sample classes created and assigned to teacher")
+            print("✅ Sample class schedules created")
             
             # Enroll students in classes if students exist
-            cursor.execute('SELECT id FROM students LIMIT 5')
+            cursor.execute('SELECT id FROM students LIMIT 6')
             students = cursor.fetchall()
             
             if students and class_ids:
-                for student in students:
-                    for class_id in class_ids:
-                        cursor.execute(
-                            'INSERT OR IGNORE INTO enrollment (student_id, class_id, subject, department, section, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                            (student['id'], class_id, 'Computer Science', 'Computer Science', 'A', 3, '2024-2025')
-                        )
+                enrollment_count = 0
+                # Enroll students in specific classes with different counts
+                enrollments = [
+                    # Class 1: Database Systems - 1 student
+                    (students[0]['id'], class_ids[0], 'Database Systems', 'Computer Science', 'A', 3, '2024-2025'),
+                    
+                    # Class 2: Data Structures - 3 students
+                    (students[0]['id'], class_ids[1], 'Data Structures', 'Computer Science', 'A', 3, '2024-2025'),
+                    (students[1]['id'], class_ids[1], 'Data Structures', 'Computer Science', 'A', 3, '2024-2025'),
+                    (students[2]['id'], class_ids[1], 'Data Structures', 'Computer Science', 'A', 3, '2024-2025'),
+                    
+                    # Class 3: Advanced Data Structures - 2 students
+                    (students[3]['id'], class_ids[2], 'Advanced Data Structures', 'Computer Science', 'A', 3, '2024-2025'),
+                    (students[4]['id'], class_ids[2], 'Advanced Data Structures', 'Computer Science', 'A', 3, '2024-2025'),
+                    
+                    # Class 4: Business Economics - 3 students
+                    (students[0]['id'], class_ids[3], 'Business Economics', 'Economics', 'A', 3, '2024-2025'),
+                    (students[1]['id'], class_ids[3], 'Business Economics', 'Economics', 'A', 3, '2024-2025'),
+                    (students[5]['id'], class_ids[3], 'Business Economics', 'Economics', 'A', 2, '2024-2025'),
+                    
+                    # Class 5: SQL and Database Design - 2 students
+                    (students[2]['id'], class_ids[4], 'SQL and Database Design', 'Computer Science', 'A', 3, '2024-2025'),
+                    (students[3]['id'], class_ids[4], 'SQL and Database Design', 'Computer Science', 'A', 3, '2024-2025'),
+                    
+                    # Class 6: Frontend Development - 2 students
+                    (students[4]['id'], class_ids[5], 'Frontend Development', 'Computer Science', 'A', 3, '2024-2025'),
+                    (students[5]['id'], class_ids[5], 'Frontend Development', 'Computer Science', 'A', 2, '2024-2025'),
+                ]
                 
-                print("✅ Students enrolled in all classes")
+                for enrollment in enrollments:
+                    cursor.execute(
+                        'INSERT OR IGNORE INTO enrollment (student_id, class_id, subject, department, section, semester, academic_year) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        enrollment
+                    )
+                    enrollment_count += 1
+                
+                print(f"✅ {enrollment_count} student enrollments created")
+    
+    # FIX EXISTING CLASS NAMES if they have numbers prefixed
+    print("🔄 Fixing existing class names...")
+    cursor.execute("SELECT id, class_name FROM classes WHERE class_name LIKE '% %'")
+    existing_classes = cursor.fetchall()
+    
+    for class_row in existing_classes:
+        class_id = class_row['id']
+        current_name = class_row['class_name']
+        
+        # Remove numbers and extra spaces from class names
+        cleaned_name = ' '.join([word for word in current_name.split() if not word.isdigit()])
+        
+        if cleaned_name != current_name:
+            cursor.execute('UPDATE classes SET class_name = ? WHERE id = ?', (cleaned_name, class_id))
+            print(f"   ✅ Fixed class {class_id}: '{current_name}' -> '{cleaned_name}'")
     
     conn.commit()
     conn.close()
     print("✅ Database initialized with all tables!")
     print("📍 Database file: smartattend.db")
-    print("📊 Tables created:")
+    print("📊 Tables created/updated:")
     print("   - users, students, teacher_profiles, classes, enrollment")
     print("   - attendance, face_encodings")
     print("   - departments, subjects, class_schedules")
@@ -433,7 +526,14 @@ def init_db():
     print("   - Teacher: teacher@smartattend.com / teacher123")
     print("   - Students: student1@smartattend.com / student123")
     print("               student2@smartattend.com / student123")
-    print("               ... up to student5@smartattend.com")
+    print("               ... up to student6@smartattend.com")
+    print("\n📚 Sample Courses Created:")
+    print("   - Database Systems (1 student)")
+    print("   - Data Structures (3 students)")
+    print("   - Advanced Data Structures (2 students)")
+    print("   - Business Economics (3 students)")
+    print("   - SQL and Database Design (2 students)")
+    print("   - Frontend Development (2 students)")
 
 if __name__ == "__main__":
     init_db()
