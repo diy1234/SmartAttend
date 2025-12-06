@@ -5,7 +5,46 @@ from flask_cors import CORS
 from flask_mail import Mail, Message
 from config import Config
 from models.database import init_db
-from face_recognition_service import face_service
+# Import face recognition service if available. If OpenCV / numpy are incompatible
+# (common on Windows when binary wheels mismatch), fall back to a lightweight stub
+# that provides the same interface but returns informative errors or empty results.
+try:
+    from face_recognition_service import face_service
+except Exception as _import_err:
+    class _StubFaceService:
+        def __init__(self, err=None):
+            self.known_faces = {}
+            self.is_trained = False
+            self._error = err
+
+        def load_known_faces(self):
+            return None
+
+        def get_model_status(self):
+            return {
+                'is_trained': False,
+                'error': str(self._error) if self._error else 'face service unavailable'
+            }
+
+        def get_service_status(self):
+            return {
+                'face_count': 0,
+                'face_cascade_loaded': False,
+                'known_users': []
+            }
+
+        def register_face(self, user_id, image_data):
+            return {'success': False, 'error': 'Face registration unavailable: face modules not installed.'}
+
+        def recognize_faces(self, image_data):
+            return {
+                'success': False,
+                'recognized_faces': [],
+                'total_faces_detected': 0,
+                'error': 'Face recognition unavailable: face modules not installed.'
+            }
+
+    face_service = _StubFaceService(_import_err)
 
 # Import blueprints
 from routes.auth import auth_bp
@@ -22,6 +61,7 @@ from routes.admin_routes import admin_bp
 from routes.departments_routes import departments_bp
 from routes.admin_list_routes import admin_list_bp
 from routes.student_routes import student_bp
+from routes.contact_routes import contact_bp
 
 from routes.teacher_subjects import teacher_subjects_bp
 app = Flask(__name__)
@@ -46,7 +86,7 @@ app.register_blueprint(admin_bp, url_prefix='/api')
 app.register_blueprint(departments_bp, url_prefix='/api/departments')
 app.register_blueprint(admin_list_bp, url_prefix='/api/admin')
 app.register_blueprint(student_bp, url_prefix='/api/student')
-
+app.register_blueprint(contact_bp, url_prefix="/api/contact")
 app.register_blueprint(teacher_subjects_bp, url_prefix='/api')
 @app.route('/')
 def api_info():
@@ -129,6 +169,40 @@ def get_face_model_status():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/debug/recent-attendance', methods=['GET'])
+def debug_recent_attendance():
+    """Debug endpoint to check recent attendance records"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get recent attendance records (last 10)
+        cursor.execute('''
+            SELECT a.id, a.student_id, a.class_id, a.attendance_date, a.status, 
+                   a.created_at, u.name as student_name, c.subject, c.teacher_id,
+                   tp.full_name as teacher_name
+            FROM attendance a
+            JOIN students s ON a.student_id = s.id
+            JOIN users u ON s.user_id = u.id
+            JOIN classes c ON a.class_id = c.id
+            LEFT JOIN teacher_profiles tp ON c.teacher_id = tp.id
+            ORDER BY a.created_at DESC
+            LIMIT 10
+        ''')
+        
+        recent_attendance = cursor.fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            'recent_attendance': [dict(record) for record in recent_attendance],
+            'count': len(recent_attendance),
+            'message': 'Most recent attendance records'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/debug/face-data', methods=['GET'])
 def debug_face_data():

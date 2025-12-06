@@ -538,13 +538,11 @@ function convertTo24Hour(time) {
 
                   <div className="flex gap-2 mt-2">
                     <Link
-                      to={`/departments/${slugify(dept.name)}/${slugify(
-                        subj.name
-                      )}`}
+                      to={`/subject-students?dept=${encodeURIComponent(dept.name)}&subject=${encodeURIComponent(subj.name)}`}
                       className="text-blue-700 underline"
-                    >
-                      View
-                    </Link>
+                      >
+                        View
+                      </Link>
 
                     <button
                       onClick={() => handleRemoveSubjectClick(dept, subj)}

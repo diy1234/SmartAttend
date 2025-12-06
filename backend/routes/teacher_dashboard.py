@@ -394,7 +394,7 @@ def get_course_attendance(class_id):
 
 @teacher_dashboard_bp.route('/mark-attendance', methods=['POST'])
 def mark_attendance():
-    """Mark attendance for students in a course"""
+    """Mark attendance for students in a course - Enhanced version"""
     try:
         data = request.get_json()
         
@@ -402,6 +402,8 @@ def mark_attendance():
         attendance_date = data.get('date')
         attendance_data = data.get('attendance')  # List of {student_id, status}
         marked_by = data.get('teacher_id')  # Teacher user ID from request
+        
+        print(f"📝 Marking attendance - Class: {class_id}, Date: {attendance_date}, Records: {len(attendance_data)}")
         
         if not all([class_id, attendance_date, attendance_data, marked_by]):
             return jsonify({'error': 'Missing required fields'}), 400
@@ -417,9 +419,11 @@ def mark_attendance():
             # If no teacher profile exists, still allow marking using the teacher user ID
             teacher_profile_id = None
             teacher_user_id = marked_by
+            print(f"⚠️ No teacher profile found for user_id: {marked_by}")
         else:
             teacher_profile_id = teacher_profile['id']
             teacher_user_id = teacher_profile['user_id']
+            print(f"👨‍🏫 Teacher profile found: {teacher_profile_id}")
         
         # Get class details with course and subject info
         cursor.execute('''
@@ -462,6 +466,8 @@ def mark_attendance():
         course = class_info['course']
         department = class_info['department']
         
+        print(f"📚 Class info - Subject: {subject}, Course: {course}, Department: {department}")
+        
         # Mark attendance for each student
         success_count = 0
         errors = []
@@ -475,6 +481,14 @@ def mark_attendance():
                 continue
             
             try:
+                # Check if student exists
+                cursor.execute('SELECT id FROM students WHERE id = ?', (student_id,))
+                student = cursor.fetchone()
+                
+                if not student:
+                    errors.append(f"Student not found: {student_id}")
+                    continue
+                
                 # Check if attendance already exists for this date
                 cursor.execute('''
                     SELECT id FROM attendance 
@@ -487,9 +501,10 @@ def mark_attendance():
                     # Update existing attendance (store the teacher's user id in marked_by)
                     cursor.execute('''
                         UPDATE attendance 
-                        SET status = ?, marked_by = ?, created_at = CURRENT_TIMESTAMP
+                        SET status = ?, marked_by = ?, subject = ?, department = ?, course = ?, created_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    ''', (status, teacher_user_id, existing['id']))
+                    ''', (status, teacher_user_id, subject, department, course, existing['id']))
+                    print(f"🔄 Updated attendance for student {student_id}")
                 else:
                     # Insert new attendance
                     cursor.execute('''
@@ -497,27 +512,35 @@ def mark_attendance():
                         (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (student_id, class_id, attendance_date, status, teacher_user_id, subject, department, course))
+                    print(f"✅ Created new attendance for student {student_id}")
                 
                 success_count += 1
                 
             except sqlite3.Error as e:
-                errors.append(f"Failed to mark attendance for student {student_id}: {str(e)}")
+                error_msg = f"Failed to mark attendance for student {student_id}: {str(e)}"
+                errors.append(error_msg)
+                print(f"❌ {error_msg}")
         
         conn.commit()
         conn.close()
         
         response = {
             'message': f'Attendance marked successfully for {success_count} students',
-            'success_count': success_count
+            'success_count': success_count,
+            'class_id': class_id,
+            'date': attendance_date
         }
         
         if errors:
             response['errors'] = errors
         
+        print(f"🎉 Attendance marking completed - Success: {success_count}, Errors: {len(errors)}")
         return jsonify(response), 200
         
     except Exception as e:
-        print(f"Error in mark_attendance: {str(e)}")
+        print(f"❌ Error in mark_attendance: {str(e)}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 @teacher_dashboard_bp.route('/attendance-summary/<int:class_id>', methods=['GET'])

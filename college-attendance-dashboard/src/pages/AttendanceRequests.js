@@ -1,8 +1,155 @@
-// AttendanceRequests.js (updated - pending only)
+// AttendanceRequests (final)
 import React, { useState, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import UserContext from "../context/UserContext";
 import ToastContext from "../context/ToastContext";
+import { exportSheetsToExcel } from '../utils/exportUtils';
+
+function AttendanceHistoryInline({ userProp }) {
+  const userState = userProp || JSON.parse(localStorage.getItem("user")) || {};
+
+  const [dept, setDept] = useState('');
+  const [subject, setSubject] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [approvedByFilter, setApprovedByFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  const [items, setItems] = useState([]);
+  const [filtered, setFiltered] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    const fetchProcessedRequests = async () => {
+      setLoadingHistory(true);
+      try {
+        const role = userState.role || 'student';
+        let url = `http://127.0.0.1:5000/api/attendance-requests/requests/processed?role=${encodeURIComponent(role)}`;
+        if (role === 'student') url += `&student_id=${encodeURIComponent(userState.student_id || userState.id)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Failed to fetch');
+        const data = await resp.json();
+        setItems(data || []);
+      } catch (e) {
+        console.error(e);
+        setItems([]);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+    fetchProcessedRequests();
+  }, [userState.role, userState.id, userState.student_id]);
+
+  const depts = Array.from(new Set((items || []).map(r => r.department).filter(Boolean)));
+
+  useEffect(() => {
+    let list = (items || []).slice();
+    if (dept) list = list.filter(r => (r.department || '').toLowerCase() === dept.toLowerCase());
+    if (subject) list = list.filter(r => (r.subject || '').toLowerCase().includes(subject.toLowerCase()));
+    if (statusFilter === 'approved') list = list.filter(r => r.status === 'approved');
+    if (statusFilter === 'rejected') list = list.filter(r => r.status === 'rejected');
+    if (approvedByFilter === 'faculty') list = list.filter(r => (r.processed_by_role || '').toLowerCase() === 'teacher' || (r.processed_by_role || '').toLowerCase() === 'faculty');
+    if (approvedByFilter === 'admin') list = list.filter(r => (r.processed_by_role || '').toLowerCase() === 'admin');
+    if (classFilter) list = list.filter(r => ((r.section || r.class || '') === classFilter));
+    setFiltered(list);
+  }, [items, dept, subject, statusFilter, approvedByFilter, classFilter]);
+
+  const handleExport = () => {
+    if (!filtered.length) return alert('No records to export for the selected filters.');
+    const rows = filtered.map(r => ({
+      Student: r.student_name,
+      Enrollment: r.enrollment_no,
+      Subject: r.subject,
+      Department: r.department,
+      Date: r.request_date,
+      Reason: r.reason,
+      Status: r.status,
+      'Processed At': r.responded_at,
+      'Processed By': r.processed_by_name ? `${r.processed_by_name} (${r.processed_by_role || ''})` : (r.processed_by_role || '')
+    }));
+    exportSheetsToExcel(`processed-requests-${new Date().toISOString().slice(0,10)}`, [{ name: 'Requests', data: rows }]);
+  };
+
+  if (loadingHistory) return <div className="mt-8 p-6 bg-white rounded-xl shadow text-gray-600">Loading attendance history...</div>;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-semibold">Attendance History</h2>
+        <div className="text-sm text-gray-500">Showing {filtered.length} records</div>
+      </div>
+
+      <div className="bg-white p-4 rounded-2xl mb-6 shadow-sm border">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div>
+            <label className="block text-sm mb-1 text-gray-600">Course / Dept</label>
+            <select value={dept} onChange={e => setDept(e.target.value)} className="border p-2 rounded w-full focus:ring-1 focus:ring-blue-500">
+              <option value="">All</option>
+              {depts.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm mb-1 text-gray-600">Subject</label>
+            <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject (optional)" className="border p-2 rounded w-full focus:ring-1 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1 text-gray-600">Status</label>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border p-2 rounded w-full focus:ring-1 focus:ring-blue-500">
+              <option value="all">All</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm mb-1 text-gray-600">Processed By</label>
+            <select value={approvedByFilter} onChange={e => setApprovedByFilter(e.target.value)} className="border p-2 rounded w-full focus:ring-1 focus:ring-blue-500">
+              <option value="">All</option>
+              <option value="faculty">Teacher</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div className="flex items-end gap-2">
+            <button onClick={() => { setDept(''); setSubject(''); setStatusFilter('all'); setApprovedByFilter(''); setClassFilter(''); }} className="px-3 py-2 bg-gray-100 rounded">Clear</button>
+            <button onClick={handleExport} className="px-3 py-2 bg-blue-700 text-white rounded">Export</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm p-8 text-center text-gray-600">No processed requests found for the current filters.</div>
+        ) : (
+          filtered.map(r => (
+            <div key={r.id} className="bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-start gap-4">
+                  <div>
+                    <div className="font-semibold text-gray-800">{r.student_name}</div>
+                    <div className="text-sm text-gray-500">{r.enrollment_no}</div>
+                  </div>
+                  <div className="ml-4">
+                    <div className="text-sm text-gray-600">{r.subject} • {r.department}</div>
+                    <div className="text-xs text-gray-400">Requested: {r.request_date}</div>
+                  </div>
+                </div>
+                <div className="mt-3 text-sm text-gray-700">{r.reason || 'No reason provided'}</div>
+              </div>
+
+              <div className="flex flex-col items-start md:items-end gap-2">
+                <div>
+                  <span className={`px-3 py-1 text-sm rounded-full ${r.status === 'approved' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {r.status.toUpperCase()}
+                  </span>
+                </div>
+                <div className="text-sm text-gray-500">Processed: {r.responded_at || '—'}</div>
+                <div className="text-sm text-gray-600">By: {r.processed_by_name ? `${r.processed_by_name} (${r.processed_by_role || ''})` : (r.processed_by_role || '—')}</div>
+                <div className="text-sm text-gray-600">Teacher: {r.teacher_name || '—'}</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AttendanceRequests() {
   const navigate = useNavigate();
@@ -180,10 +327,10 @@ function AttendanceRequests() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <button onClick={() => handleApprove(req.id)} disabled={actionLoading === req.id} className="bg-green-600 text-white px-4 py-2 rounded">
+                <button onClick={() => handleApprove(req.request_id || req.id)} disabled={actionLoading === req.id} className="bg-green-600 text-white px-4 py-2 rounded">
                   {actionLoading === req.id ? 'Processing...' : 'Approve'}
                 </button>
-                <button onClick={() => handleReject(req.id)} disabled={actionLoading === req.id} className="bg-red-600 text-white px-4 py-2 rounded">
+                <button onClick={() => handleReject(req.request_id || req.id)} disabled={actionLoading === req.id} className="bg-red-600 text-white px-4 py-2 rounded">
                   {actionLoading === req.id ? 'Processing...' : 'Reject'}
                 </button>
               </div>
@@ -191,6 +338,7 @@ function AttendanceRequests() {
           ))}
         </div>
       )}
+    <AttendanceHistoryInline userProp={user} />
     </div>
   );
 }

@@ -295,29 +295,7 @@ function TakeAttendance() {
         />
         <span className="text-sm text-gray-500">{filteredStudents.length} students</span>
         <div className="ml-auto flex items-center gap-3">
-          <div className="text-sm text-gray-700">
-            Selected: <strong>{students.find(s=>s.id===selectedStudentId)?.name || 'None'}</strong>
-          </div>
-          {!cameraOn ? (
-            <button
-              onClick={startCamera}
-              disabled={locked}
-              className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-700 disabled:opacity-50"
-            >
-              📷 Start Camera
-            </button>
-          ) : (
-            <button onClick={stopCamera} className="px-3 py-1 rounded-lg bg-red-600 text-white">
-              Stop Camera
-            </button>
-          )}
-          <button
-            onClick={capturePhoto}
-            disabled={!cameraOn || !selectedStudentId}
-            className="px-3 py-1 rounded-lg bg-green-600 text-white disabled:opacity-50"
-          >
-            Capture
-          </button>
+          {/* Camera controls removed per request */}
         </div>
       </div>
 

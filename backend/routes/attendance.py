@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from models.database import get_db_connection
+from services.notification_service import NotificationService
 
 attendance_bp = Blueprint('attendance', __name__)
 
@@ -8,7 +9,7 @@ attendance_bp = Blueprint('attendance', __name__)
 def mark_attendance():
     try:
         data = request.get_json()
-        student_id = data.get('student_id')
+        student_id = data.get('student_id')    # students.id
         class_id = data.get('class_id')
         status = data.get('status')
         marked_by = data.get('marked_by')
@@ -18,17 +19,100 @@ def mark_attendance():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Mark / update today's attendance
         cursor.execute('''
             INSERT OR REPLACE INTO attendance 
             (student_id, class_id, attendance_date, status, marked_by)
             VALUES (?, ?, ?, ?, ?)
         ''', (student_id, class_id, attendance_date, status, marked_by))
         
+        # --------- CHECK ATTENDANCE PERCENTAGE ----------
+        cursor.execute('''
+            SELECT 
+                SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as present_count,
+                COUNT(*) as total_classes
+            FROM attendance
+            WHERE student_id = ?
+        ''', (student_id,))
+        
+        stats = cursor.fetchone()
+        present = stats['present_count'] or 0
+        total = stats['total_classes'] or 1
+        percentage = (present / total) * 100.0
+
+        # Find the student's user_id
+        cursor.execute('SELECT user_id FROM students WHERE id = ?', (student_id,))
+        stu = cursor.fetchone()
+        student_user_id = stu['user_id'] if stu else None
+
+        # If attendance < 75%, send warning (max once per day)
+        if student_user_id and percentage < 75:
+            cursor.execute('''
+                SELECT COUNT(*) as c
+                FROM notifications
+                WHERE user_id = ? 
+                  AND type = 'attendance_warning'
+                  AND DATE(created_at) = DATE('now')
+            ''', (student_user_id,))
+            already = cursor.fetchone()['c']
+
+            if already == 0:
+                NotificationService.notify_user(
+                    user_id=student_user_id,
+                    title="Low Attendance Warning",
+                    message=f"Your attendance is now {percentage:.2f}%. Please attend regularly to avoid shortage.",
+                    notification_type='attendance_warning'
+                )
+
         conn.commit()
         conn.close()
         
         return jsonify({'message': 'Attendance marked successfully'}), 201
+    
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@attendance_bp.route('/student-stats', methods=['GET'])
+def get_student_attendance_stats():
+    """Get overall attendance statistics by department and subject for a student"""
+    student_id = request.args.get('student_id')
+    
+    if not student_id:
+        return jsonify({'error': 'student_id is required'}), 400
+    
+    try:
+        student_id = int(student_id)
+    except ValueError:
+        return jsonify({'error': 'Invalid student_id'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get attendance statistics grouped by department and subject
+        cursor.execute('''
+            SELECT 
+                a.department,
+                a.subject,
+                COUNT(*) as total_classes,
+                SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as classes_attended,
+                ROUND(SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as attendance_percent
+            FROM attendance a
+            WHERE a.student_id = ?
+            GROUP BY a.department, a.subject
+            ORDER BY a.department, a.subject
+        ''', (student_id,))
+        
+        stats = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    
+    except Exception as e:
+        conn.close()
         return jsonify({'error': str(e)}), 500
 
 @attendance_bp.route('/', methods=['GET'])
@@ -106,6 +190,7 @@ def get_attendance_analytics():
         ''', (teacher_profile_id,))
         
         overall_stats = dict(cursor.fetchone())
+        print(f"📊 Analytics for teacher_profile_id {teacher_profile_id}: {overall_stats}")
         
         # Get subject-wise statistics - FIXED: Use classes table
         cursor.execute(f'''
@@ -122,6 +207,7 @@ def get_attendance_analytics():
         ''', (teacher_profile_id,))
         
         subject_stats = [dict(row) for row in cursor.fetchall()]
+        print(f"📚 Subject-wise stats: {len(subject_stats)} subjects found")
         
         # Get daily statistics - FIXED: Use classes table
         cursor.execute(f'''

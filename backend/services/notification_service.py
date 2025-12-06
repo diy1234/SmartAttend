@@ -22,12 +22,28 @@ class NotificationService:
             return None
         finally:
             conn.close()
+
+    @staticmethod
+    def notify_user(user_id, title, message, notification_type="system", related_id=None):
+        """
+        Generic helper to notify any user (student, teacher, admin)
+        """
+        return NotificationService.create_notification(
+            user_id=user_id,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            related_id=related_id
+        )
     
     @staticmethod
     def notify_class_scheduled(teacher_id, class_schedule_data):
         """Notify teacher about new class schedule"""
         title = "New Class Scheduled"
-        message = f"Class scheduled for {class_schedule_data['day_of_week']} at {class_schedule_data['start_time']} - {class_schedule_data['subject_name']}"
+        message = (
+            f"Class scheduled for {class_schedule_data['day_of_week']} at "
+            f"{class_schedule_data['start_time']} - {class_schedule_data['subject_name']}"
+        )
         
         return NotificationService.create_notification(
             user_id=teacher_id,
@@ -41,7 +57,10 @@ class NotificationService:
     def notify_attendance_request(teacher_id, request_data):
         """Notify teacher about new attendance request"""
         title = "New Attendance Request"
-        message = f"{request_data['student_name']} from {request_data['department']} - {request_data['subject']} requests attendance for {request_data['request_date']}"
+        message = (
+            f"{request_data['student_name']} from {request_data['department']} - "
+            f"{request_data['subject']} requests attendance for {request_data['request_date']}"
+        )
         
         return NotificationService.create_notification(
             user_id=teacher_id,
@@ -50,21 +69,23 @@ class NotificationService:
             notification_type='attendance_request',
             related_id=request_data.get('id')
         )
+
+    @staticmethod
+    def notify_teacher_subject_assignment(teacher_user_id, assignment_data):
+        """Notify teacher about new subject assignment"""
+        title = "New Subject Assignment"
+        message = (
+            f"You have been assigned to teach {assignment_data['subject_name']} "
+            f"in {assignment_data['department_name']}"
+        )
     
-        @staticmethod
-        def notify_teacher_subject_assignment(teacher_user_id, assignment_data):
-            """Notify teacher about new subject assignment"""
-            title = "New Subject Assignment"
-            message = f"You have been assigned to teach {assignment_data['subject_name']} in {assignment_data['department_name']}"
-        
-            return NotificationService.create_notification(
-                user_id=teacher_user_id,
-                title=title,
-                message=message,
-                notification_type='alert',
-                related_id=assignment_data.get('id')
-            )
-    
+        return NotificationService.create_notification(
+            user_id=teacher_user_id,
+            title=title,
+            message=message,
+            notification_type='alert',
+            related_id=assignment_data.get('id')
+        )
     
     @staticmethod
     def notify_system_alert(teacher_id, title, message):
@@ -100,11 +121,7 @@ class NotificationService:
     
     @staticmethod
     def notify_admins(title, message, notification_type="system", related_id=None):
-        """Notify all admins by creating a notification per-admin using create_notification
-
-        Uses the central `create_notification` so format, related_id, and created_at
-        are handled consistently with other notification creators.
-        """
+        """Notify all admins by creating a notification per-admin"""
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -125,7 +142,6 @@ class NotificationService:
             print(f"Error notifying admins: {e}")
         finally:
             conn.close()
-
 
     @staticmethod
     def mark_notification_as_read(notification_id):

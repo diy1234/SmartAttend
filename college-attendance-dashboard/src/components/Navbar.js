@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useContext } from "react";
+import { useLocation } from 'react-router-dom';
 import { Link, useNavigate } from "react-router-dom";
 import { FaBell } from "react-icons/fa";
 import UserContext from "../context/UserContext";
@@ -11,6 +12,7 @@ const Navbar = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, setUser } = useContext(UserContext);
 
   useEffect(() => {
@@ -70,20 +72,48 @@ const Navbar = () => {
   };
 
   // Limit searchable pages based on role. For students, restrict to student-facing pages only.
-  const pages = (user?.role === 'student') ? [
-    { label: "Student Dashboard", path: "/student-dashboard", keywords: ["dashboard", "home"] },
-    { label: "My Profile", path: "/student-profile", keywords: ["profile", "about", "my profile"] },
-    { label: "My Requests", path: "/my-requests", keywords: ["requests", "leave", "my requests"] },
-    { label: "Attendance", path: "/student-attendance", keywords: ["attendance", "records", "student attendance"] },
-    { label: "Attendance History", path: "/attendance-history", keywords: ["history", "attendance history"] },
-    { label: "About Me", path: "/student-about", keywords: ["about me", "about"] },
-    { label: "Face Registration", path: "/face-registration", keywords: ["face", "registration", "register face"] },
-    { label: "My Report", path: "/student-report", keywords: ["report", "performance", "my report"] },
-    { label: "Attendance Requests", path: "/attendance-requests", keywords: ["requests", "attendance requests"] },
-    { label: "Settings", path: "/settings", keywords: ["settings", "preferences"] },
-    { label: "About", path: "/about", keywords: ["about"] },
-    { label: "Contact", path: "/contact", keywords: ["contact"] },
-  ] : [
+  // If currently on the Student Dashboard, prefer internal dashboard anchors so the search
+  // can jump to sections inside the dashboard (e.g., #attendance, #requests).
+  const isOnStudentDashboard = location.pathname && location.pathname.startsWith('/student-dashboard');
+  const isOnTeacherDashboard = location.pathname && location.pathname.startsWith('/teacher-dashboard');
+  const pages = (user?.role === 'student') ? (
+    isOnStudentDashboard ? [
+      { label: "Dashboard Overview", path: "/student-dashboard#overview", keywords: ["overview", "dashboard"] },
+      { label: "Attendance Summary", path: "/student-dashboard#attendance", keywords: ["attendance", "summary", "attendance summary"] },
+      { label: "Subjects Chart", path: "/student-dashboard#subjects", keywords: ["subjects", "chart", "subject wise"] },
+      { label: "Submit Request", path: "/student-dashboard#requests", keywords: ["request", "attendance request", "submit request"] },
+      { label: "My Profile (card)", path: "/student-dashboard#profile", keywords: ["profile", "card", "my profile"] },
+      { label: "Register Face", path: "/face-registration", keywords: ["face", "register", "registration"] },
+    ] : [
+      { label: "Student Dashboard", path: "/student-dashboard", keywords: ["dashboard", "home"] },
+      { label: "My Profile", path: "/student-profile", keywords: ["profile", "about", "my profile"] },
+      { label: "My Requests", path: "/my-requests", keywords: ["requests", "leave", "my requests"] },
+      { label: "Attendance", path: "/student-attendance", keywords: ["attendance", "records", "student attendance"] },
+      { label: "Attendance History", path: "/attendance-history", keywords: ["history", "attendance history"] },
+      { label: "About Me", path: "/student-about", keywords: ["about me", "about"] },
+      { label: "Face Registration", path: "/face-registration", keywords: ["face", "registration", "register face"] },
+      { label: "My Report", path: "/student-report", keywords: ["report", "performance", "my report"] },
+      { label: "Attendance Requests", path: "/attendance-requests", keywords: ["requests", "attendance requests"] },
+      { label: "Settings", path: "/settings", keywords: ["settings", "preferences"] },
+      { label: "About", path: "/about", keywords: ["about"] },
+      { label: "Contact", path: "/contact", keywords: ["contact"] },
+    ]
+  ) : (user?.role === 'teacher') ? (
+    isOnTeacherDashboard ? [
+      { label: "Dashboard Overview", path: "/teacher-dashboard#overview", keywords: ["overview", "dashboard"] },
+      { label: "My Courses", path: "/teacher-dashboard#courses", keywords: ["courses", "my courses", "subjects"] },
+      { label: "Weekly Schedule", path: "/teacher-dashboard#schedule", keywords: ["schedule", "weekly", "timetable"] },
+      { label: "Attendance Analytics", path: "/teacher-dashboard#analytics", keywords: ["attendance", "analytics", "attendance analytics"] },
+      { label: "Pending Requests", path: "/teacher-dashboard#requests", keywords: ["requests", "pending", "attendance requests"] },
+      { label: "Notifications", path: "/teacher-dashboard#notifications", keywords: ["notifications", "alerts"] },
+    ] : [
+      { label: "Teacher Dashboard", path: "/teacher-dashboard", keywords: ["dashboard", "teacher dashboard"] },
+      { label: "Take Attendance", path: "/take-attendance", keywords: ["attendance", "take attendance"] },
+      { label: "Attendance Requests", path: "/attendance-requests", keywords: ["requests", "attendance requests"] },
+      { label: "Notifications", path: "/notifications", keywords: ["notifications"] },
+      { label: "My Profile", path: "/teacher-about", keywords: ["profile", "about", "teacher profile"] },
+    ]
+  ) : [
     { label: "Dashboard", path: "/dashboard", keywords: ["dashboard", "home"] },
     { label: "Admin Profile", path: "/admin-profile", keywords: ["profile", "admin"] },
     { label: "Admins", path: "/admins", keywords: ["admins", "administrators"] },
@@ -91,7 +121,6 @@ const Navbar = () => {
     { label: "Teachers", path: "/teachers", keywords: ["teachers", "teacher"] },
     { label: "Settings", path: "/settings", keywords: ["settings", "preferences"] },
     { label: "About", path: "/about", keywords: ["about"] },
-    { label: "Contact", path: "/contact", keywords: ["contact"] },
   ];
 
   // Load entity lists (students/teachers) from localStorage or use small samples
@@ -222,19 +251,16 @@ const Navbar = () => {
         <Link to="/about" className="text-gray-700 hover:text-[#132E6B] font-medium">
           About
         </Link>
-        <Link to="/contact" className="text-gray-700 hover:text-[#132E6B] font-medium">
-          Contact
-        </Link>
+        {user?.role === 'student' && (
+          <Link to="/contact" className="text-gray-700 hover:text-[#132E6B] font-medium">
+            Contact
+          </Link>
+        )}
       </div>
 
       {/* Right: Notifications + Profile + Logout */}
   <div className="flex items-center gap-4 relative">
-        {/* Quick links for teachers */}
-        {user?.role === 'teacher' && (
-          <div className="mr-3">
-            <Link to="/teacher-face" className="bg-green-600 text-white px-3 py-1 rounded-md text-sm hover:bg-green-700">Mark Attendance</Link>
-          </div>
-        )}
+        {/* Quick links for teachers removed per request */}
         {/* Face registration for students */}
         {user?.role === 'student' && (
           <div className="mr-3">
@@ -269,50 +295,56 @@ const Navbar = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <Link to={user?.role === 'student' ? '/student-profile' : user?.role === 'teacher' ? '/teacher-about' : '/admin-profile'} className="flex items-center">
-              <img
-                src={
-                  (user && user.photo) ||
-                  "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-                }
-                alt="avatar"
-                className="w-8 h-8 rounded-full object-cover border"
-                title="Admin Profile"
-              />
-            </Link>
+          <div className="flex items-center gap-2">
+            <div className="relative inline-block">
+              <Link to={user?.role === 'student' ? '/student-profile' : user?.role === 'teacher' ? '/teacher-about' : '/admin-profile'}>
+                <img
+                  src={
+                    (user && user.photo) ||
+                    "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
+                  }
+                  alt="avatar"
+                  className="w-8 h-8 rounded-full object-cover border"
+                  title="Profile"
+                />
+              </Link>
 
-            {/* camera overlay */}
-            <label
-              title="Change avatar"
-              className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border cursor-pointer"
-            >
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files[0];
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    const updated = { ...(user || {}), photo: reader.result };
-                    localStorage.setItem("user", JSON.stringify(updated));
-                    setUser(updated);
-                  };
-                  if (file) reader.readAsDataURL(file);
-                }}
-                className="absolute inset-0 w-5 h-5 opacity-0 cursor-pointer"
-              />
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                className="w-4 h-4 text-gray-700"
+              {/* camera overlay (positioned relative to avatar only) */}
+              <label
+                title="Change avatar"
+                className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border cursor-pointer"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 7h3l2-3h6l2 3h3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
-                <circle cx="12" cy="13" r="3" strokeWidth="1.5" />
-              </svg>
-            </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      const updated = { ...(user || {}), photo: reader.result };
+                      localStorage.setItem("user", JSON.stringify(updated));
+                      setUser(updated);
+                    };
+                    if (file) reader.readAsDataURL(file);
+                  }}
+                  className="absolute inset-0 w-5 h-5 opacity-0 cursor-pointer"
+                />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  className="w-4 h-4 text-gray-700"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 7h3l2-3h6l2 3h3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                  <circle cx="12" cy="13" r="3" strokeWidth="1.5" />
+                </svg>
+              </label>
+            </div>
+
+            <Link to={user?.role === 'student' ? '/student-profile' : user?.role === 'teacher' ? '/teacher-about' : '/admin-profile'} className="hidden sm:inline-block text-sm font-medium text-gray-700">
+              {user?.name || user?.full_name || user?.email || 'Profile'}
+            </Link>
           </div>
         </div>
 

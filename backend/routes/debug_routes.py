@@ -159,3 +159,90 @@ def debug_notifications():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@debug_bp.route('/debug/attendance-analytics', methods=['GET'])
+def debug_attendance_analytics():
+    """Debug endpoint to check attendance marking and analytics"""
+    teacher_id = request.args.get('teacher_id')
+    
+    if not teacher_id:
+        return jsonify({'error': 'teacher_id parameter required'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get teacher profile ID
+        cursor.execute('SELECT id FROM teacher_profiles WHERE user_id = ?', (teacher_id,))
+        teacher_profile = cursor.fetchone()
+        
+        if not teacher_profile:
+            return jsonify({
+                'error': 'Teacher profile not found',
+                'teacher_user_id': teacher_id
+            }), 404
+        
+        teacher_profile_id = teacher_profile['id']
+        
+        # Get all classes for this teacher
+        cursor.execute('''
+            SELECT id, class_name, subject_code FROM classes WHERE teacher_id = ?
+        ''', (teacher_profile_id,))
+        
+        classes = [dict(row) for row in cursor.fetchall()]
+        
+        # Get attendance records for these classes
+        class_ids = [c['id'] for c in classes]
+        
+        attendance_data = {}
+        for class_id in class_ids:
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as present,
+                    SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as absent
+                FROM attendance
+                WHERE class_id = ?
+            ''', (class_id,))
+            
+            row = cursor.fetchone()
+            attendance_data[class_id] = dict(row) if row else {'total': 0, 'present': 0, 'absent': 0}
+        
+        # Get recent attendance records
+        cursor.execute('''
+            SELECT 
+                a.id,
+                a.student_id,
+                a.class_id,
+                a.attendance_date,
+                a.status,
+                a.marked_by,
+                a.subject,
+                a.department,
+                u.name as student_name,
+                c.class_name
+            FROM attendance a
+            JOIN students s ON a.student_id = s.id
+            JOIN users u ON s.user_id = u.id
+            JOIN classes c ON a.class_id = c.id
+            WHERE c.teacher_id = ?
+            ORDER BY a.created_at DESC
+            LIMIT 20
+        ''', (teacher_profile_id,))
+        
+        recent_attendance = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'teacher_profile_id': teacher_profile_id,
+            'classes_count': len(classes),
+            'classes': classes,
+            'attendance_by_class': attendance_data,
+            'recent_attendance': recent_attendance,
+            'total_attendance_records': sum(d['total'] for d in attendance_data.values())
+        })
+        
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 500

@@ -65,6 +65,10 @@ const Sidebar = () => {
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
+              <Link to="/contact-messages">Contact Messages</Link>
+            </li>
+            <li className="flex items-center space-x-2 hover:text-blue-300">
+              <BookOpen size={18} />
               <Link to="/manage-departments">Manage Departments & Subjects</Link>
             </li>
           </>
@@ -73,7 +77,7 @@ const Sidebar = () => {
             {/* Student view: put My Profile near the top, remove Mark Attendance (Face) link, add My Requests */}
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />
-              <Link to="/student-about">My Profile</Link>
+              <Link to="/student-profile">My Profile</Link>
             </li>
             <li className="flex items-center space-x-2 hover:text-blue-300">
               <BookOpen size={18} />

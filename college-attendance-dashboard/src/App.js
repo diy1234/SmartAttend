@@ -27,6 +27,7 @@ import StudentDashboard from "./pages/StudentDashboard";
 import StudentReport from "./pages/StudentReport";
 import StudentAttendance from "./pages/StudentAttendance";
 import AttendanceHistory from "./pages/AttendanceHistory";
+import StudentAttendanceHistory from "./pages/StudentAttendanceHistory";
 import StudentProfile from "./pages/StudentProfile";
 import StudentAboutMe from "./pages/StudentAboutMe";
 import AttendanceRequests from "./pages/AttendanceRequests";
@@ -38,6 +39,7 @@ import FacialRecognitionAttendance from './pages/FacialRecognitionAttendance'; /
 import MyRequests from './pages/MyRequests';
 import ManageDepartments from './pages/ManageDepartments';
 import AttendanceAnalytics from './pages/AttendanceAnalytics';
+import ContactMessages from './pages/ContactMessages';
 import UserContext from "./context/UserContext";
 import { DataProvider } from "./context/DataContext";
 import { ToastProvider } from './context/ToastContext';
@@ -49,6 +51,7 @@ import TeacherList from "./pages/TeacherList";
 import DepartmentList from "./pages/DepartmentList";
 import CourseList from "./pages/CourseList";
 import DepartmentSubjects from "./pages/DepartmentSubjects";
+import SubjectStudents from "./pages/SubjectStudents";
 
 // Protected route
 function ProtectedRoute({ children, allowedRoles }) {
@@ -110,6 +113,7 @@ function App() {
                   <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+                  <Route path="/contact-messages" element={<ProtectedRoute allowedRoles={["admin"]}><ContactMessages /></ProtectedRoute>} />
                   <Route path="/students" element={<ProtectedRoute allowedRoles={["admin"]}><StudentList /></ProtectedRoute>} />
                   <Route path="/teachers" element={<ProtectedRoute allowedRoles={["admin"]}><TeacherList /></ProtectedRoute>} />
                   <Route path="/departments" element={<ProtectedRoute allowedRoles={["admin"]}><DepartmentList /></ProtectedRoute>} />
@@ -122,7 +126,7 @@ function App() {
                   <Route path="/attendance-analytics" element={<ProtectedRoute allowedRoles={["teacher"]}><AttendanceAnalytics /></ProtectedRoute>} />
                   <Route path="/face-registration" element={<ProtectedRoute allowedRoles={["student"]}><FaceRegistration /></ProtectedRoute>} />
                   <Route path="/facial-recognition-attendance" element={<ProtectedRoute allowedRoles={["teacher"]}><FacialRecognitionAttendance /></ProtectedRoute>} /> {/* ADD THIS ROUTE */}
-                  <Route path="/attendance-history" element={<ProtectedRoute allowedRoles={["student","admin"]}><AttendanceHistory /></ProtectedRoute>} />
+                  <Route path="/attendance-history" element={<ProtectedRoute allowedRoles={["admin", "student"]}>{user?.role === 'admin' ? <AttendanceHistory /> : <StudentAttendanceHistory />}</ProtectedRoute>} />
                   <Route path="/student-profile" element={<ProtectedRoute allowedRoles={["student"]}><StudentProfile /></ProtectedRoute>} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   <Route path="/student-about" element={<ProtectedRoute allowedRoles={["student"]}><StudentAboutMe /></ProtectedRoute>} />
@@ -140,6 +144,7 @@ function App() {
                   <Route path="/about" element={<About />} />
                   <Route path="/contact" element={<Contact />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
+                  <Route path="/subject-students" element={<SubjectStudents />} />
                 </Routes>
               </main>
             </div>

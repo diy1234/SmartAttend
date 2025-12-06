@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from models.database import get_db_connection
 
 admin_bp = Blueprint('admin_bp', __name__)
@@ -145,3 +145,101 @@ def active_departments():
 def ping():
     """Health check for admin routes"""
     return jsonify({"status": "Admin routes working ✅"})
+
+# ==========================================================
+# 6️⃣ GET STUDENTS FOR A SUBJECT (ALWAYS RETURNS MATCHING)
+# ==========================================================
+@admin_bp.route('/admin/subject-students', methods=['GET'])
+def subject_students():
+    dept = request.args.get("dept")
+    subject = request.args.get("subject")
+
+    if not dept or not subject:
+        return jsonify({"error": "dept and subject are required"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Filter students by department AND subject (case-insensitive matching on enrollment table)
+    cur.execute("""
+        SELECT DISTINCT
+            u.name AS student_name,
+            u.email,
+            s.enrollment_no,
+            s.course,
+            s.semester,
+            s.id AS student_id
+        FROM students s
+        JOIN users u ON s.user_id = u.id
+        INNER JOIN enrollment e ON e.student_id = s.id
+        WHERE 
+            LOWER(e.department) = LOWER(?)
+            AND LOWER(e.subject) = LOWER(?)
+        ORDER BY u.name ASC
+    """, (dept, subject))
+
+    rows = cur.fetchall()
+
+    students = [dict(r) for r in rows]
+
+    conn.close()
+
+    return jsonify({"students": students})
+
+
+# --------------------------------------------------------
+# 📊 ADMIN — OVERALL ATTENDANCE SUMMARY
+# --------------------------------------------------------
+@admin_bp.route('/admin/attendance/summary', methods=['GET'])
+def attendance_summary():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 1️⃣ Summary by Department
+    cur.execute("""
+        SELECT 
+            COALESCE(department, 'Unassigned') AS department,
+            COUNT(*) AS total_classes,
+            SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) AS present_classes,
+            SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) AS absent_classes
+        FROM attendance
+        GROUP BY department
+    """)
+    dept_rows = [dict(r) for r in cur.fetchall()]
+
+    # 2️⃣ Summary by Subject
+    cur.execute("""
+        SELECT 
+            COALESCE(subject, 'Unassigned') AS subject,
+            COUNT(*) AS total_classes,
+            SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) AS present_classes,
+            SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) AS absent_classes
+        FROM attendance
+        GROUP BY subject
+    """)
+    subject_rows = [dict(r) for r in cur.fetchall()]
+
+    # 3️⃣ Summary by Student
+    cur.execute("""
+        SELECT 
+            u.name AS student_name,
+            s.enrollment_no,
+            COUNT(*) AS total_classes,
+            SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present_classes,
+            SUM(CASE WHEN a.status='absent' THEN 1 ELSE 0 END) AS absent_classes
+        FROM attendance a
+        JOIN students s ON a.student_id = s.id
+        JOIN users u ON s.user_id = u.id
+        GROUP BY s.id
+        ORDER BY u.name ASC
+    """)
+    student_rows = [dict(r) for r in cur.fetchall()]
+
+    conn.close()
+
+    return jsonify({
+        "by_department": dept_rows,
+        "by_subject": subject_rows,
+        "by_student": student_rows
+    })
+

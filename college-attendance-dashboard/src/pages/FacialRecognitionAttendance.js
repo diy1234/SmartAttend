@@ -24,6 +24,8 @@ const FacialRecognitionAttendance = () => {
   const [pendingMarks, setPendingMarks] = useState([]); // track in-flight marks to avoid duplicates
   const [scanningInterval, setScanningInterval] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const pendingMarksRef = useRef(pendingMarks);
+  const processingRef = useRef(processing);
 
   const videoConstraints = {
     width: 640,
@@ -73,12 +75,22 @@ const FacialRecognitionAttendance = () => {
 
       if (data.success) {
         if (data.recognized_faces.length > 0) {
-          // Filter out students already marked or currently pending
+          // Only accept recognized faces that are enrolled in this class
+          const enrolledIds = new Set((students || []).map(s => s.id));
+
+          // Filter out students not enrolled, already marked, or currently pending
           const newRecognizedFaces = data.recognized_faces.filter(face => 
             face.student_id &&
+            enrolledIds.has(face.student_id) &&
             !attendanceMarked.includes(face.student_id) &&
             !pendingMarks.includes(face.student_id)
           );
+
+          // Log ignored recognized faces that are not enrolled (for debugging)
+          const ignored = data.recognized_faces.filter(face => face.student_id && !enrolledIds.has(face.student_id));
+          if (ignored.length > 0) {
+            console.warn('Ignored recognition for non-enrolled students:', ignored.map(f => f.name));
+          }
 
           if (newRecognizedFaces.length > 0) {
             // Deduplicate recognizedFaces state by student_id and keep most recent
@@ -113,53 +125,62 @@ const FacialRecognitionAttendance = () => {
     }
   };
 
-  const markAttendance = async (studentId, studentName, confidence) => {
-    // Prevent duplicate marking if already marked or pending
-    if (attendanceMarked.includes(studentId) || pendingMarks.includes(studentId)) return;
+const markAttendance = async (studentId, studentName, confidence) => {
+  // Prevent duplicate marking if already marked or pending
+  if (attendanceMarked.includes(studentId) || pendingMarks.includes(studentId)) {
+    console.log(`⏭️ Skipping ${studentName} - already marked or pending`);
+    return;
+  }
 
-    // mark as pending immediately to avoid race conditions
-    setPendingMarks(prev => Array.from(new Set([...prev, studentId])));
+  // mark as pending immediately to avoid race conditions
+  setPendingMarks(prev => Array.from(new Set([...prev, studentId])));
 
-    try {
-      const teacherId = user?.id || JSON.parse(localStorage.getItem('user'))?.id;
+  try {
+    const teacherId = user?.id || JSON.parse(localStorage.getItem('user'))?.id;
 
-      if (!teacherId || !classId) {
-        showToast('Teacher ID or Class ID not found', 'error');
-        return;
-      }
-
-      const attendanceDate = new Date().toISOString().split('T')[0];
-
-      const response = await fetch('http://127.0.0.1:5000/api/teacher-dashboard/mark-attendance', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          class_id: classId,
-          date: attendanceDate,
-          attendance: [{
-            student_id: studentId,
-            status: 'present'
-          }],
-          teacher_id: teacherId
-        })
-      });
-
-      if (response.ok) {
-        setAttendanceMarked(prev => Array.from(new Set([...prev, studentId])));
-        showToast(`✅ ${studentName} marked present! (${(confidence * 100).toFixed(0)}% confidence)`, 'success');
-      } else {
-        showToast(`Failed to mark attendance for ${studentName}`, 'error');
-      }
-    } catch (error) {
-      console.error('Error marking attendance:', error);
-      showToast(`Failed to mark attendance for ${studentName}`, 'error');
-    } finally {
-      // remove from pending regardless of success/failure
-      setPendingMarks(prev => prev.filter(id => id !== studentId));
+    if (!teacherId || !classId) {
+      showToast('Teacher ID or Class ID not found', 'error');
+      return;
     }
-  };
+
+    const attendanceDate = new Date().toISOString().split('T')[0];
+    
+    console.log(`📝 Marking attendance for ${studentName} (ID: ${studentId}) in class ${classId} on ${attendanceDate}`);
+
+    const response = await fetch('http://127.0.0.1:5000/api/teacher-dashboard/mark-attendance', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        class_id: classId,
+        date: attendanceDate,
+        attendance: [{
+          student_id: studentId,
+          status: 'present'
+        }],
+        teacher_id: teacherId
+      })
+    });
+
+    const result = await response.json();
+    
+    if (response.ok) {
+      setAttendanceMarked(prev => Array.from(new Set([...prev, studentId])));
+      showToast(`✅ ${studentName} marked present! (${(confidence * 100).toFixed(0)}% confidence)`, 'success');
+      console.log(`✅ Attendance marked successfully for ${studentName}`);
+    } else {
+      console.error(`❌ Failed to mark attendance: ${result.error}`);
+      showToast(`Failed to mark attendance for ${studentName}: ${result.error}`, 'error');
+    }
+  } catch (error) {
+    console.error('❌ Error marking attendance:', error);
+    showToast(`Failed to mark attendance for ${studentName}`, 'error');
+  } finally {
+    // remove from pending regardless of success/failure
+    setPendingMarks(prev => prev.filter(id => id !== studentId));
+  }
+};
 
   const handleManualMark = (studentId, studentName) => {
     markAttendance(studentId, studentName, 1.0);
@@ -186,11 +207,14 @@ const FacialRecognitionAttendance = () => {
       const data = await response.json();
 
       if (data.success && data.recognized_faces.length > 0) {
+        const enrolledIds = new Set((students || []).map(s => s.id));
         data.recognized_faces.forEach(face => {
-          if (face.student_id && !attendanceMarked.includes(face.student_id) && !pendingMarks.includes(face.student_id)) {
+          if (face.student_id && enrolledIds.has(face.student_id) && !attendanceMarked.includes(face.student_id) && !pendingMarks.includes(face.student_id)) {
             // set pending immediately and then mark
             setPendingMarks(prev => Array.from(new Set([...prev, face.student_id])));
             markAttendance(face.student_id, face.name, face.confidence);
+          } else if (face.student_id && !enrolledIds.has(face.student_id)) {
+            console.warn('Ignored recognition for non-enrolled student:', face.name);
           }
         });
       } else {
@@ -212,9 +236,43 @@ const FacialRecognitionAttendance = () => {
     };
   }, [scanningInterval]);
 
+  // keep refs current so async wait loops can read latest values
+  useEffect(() => { pendingMarksRef.current = pendingMarks; }, [pendingMarks]);
+  useEffect(() => { processingRef.current = processing; }, [processing]);
+
   const enrolledStudentsNotMarked = students.filter(student => 
     !attendanceMarked.includes(student.id)
   );
+
+  const handleFinish = async () => {
+    // Wait for any pending markAttendance calls to finish (up to timeout)
+    const timeout = 10000; // 10s
+    const interval = 500; // 0.5s
+
+    if (processingRef.current || (pendingMarksRef.current && pendingMarksRef.current.length > 0)) {
+      showToast('Waiting for pending marks to complete...', 'info');
+
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        if (!processingRef.current && (!pendingMarksRef.current || pendingMarksRef.current.length === 0)) {
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise(res => setTimeout(res, interval));
+      }
+
+      if (processingRef.current || (pendingMarksRef.current && pendingMarksRef.current.length > 0)) {
+        showToast('Some marks are still pending; they will complete shortly. Refreshing analytics now.', 'warning');
+      }
+    }
+
+    navigate('/teacher-dashboard', { 
+      state: { 
+        refreshAnalytics: true,
+        attendanceUpdated: true 
+      } 
+    });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
@@ -367,7 +425,7 @@ const FacialRecognitionAttendance = () => {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => navigate('/teacher-dashboard')}
+              onClick={handleFinish}
               className="bg-blue-800 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
             >
               Finish

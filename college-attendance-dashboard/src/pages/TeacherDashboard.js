@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect, useContext, useRef } from "react";
 import DataContext from '../context/DataContext';
 import UserContext from '../context/UserContext';
@@ -27,6 +27,21 @@ function TeacherDashboard(){
     type_stats: {}
   });
   const [showNotifications, setShowNotifications] = useState(false);
+
+  const location = useLocation();
+
+  // Scroll to hash if present (allow navbar search to jump to sections)
+  useEffect(() => {
+    if (location && location.hash) {
+      const id = location.hash.replace('#', '');
+      setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) {
+          try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { el.scrollIntoView(); }
+        }
+      }, 80);
+    }
+  }, [location]);
 
   // Get unique departments from courses data
   const availableDepartments = [...new Set(courses.map(course => course.department).filter(Boolean))];
@@ -291,10 +306,20 @@ function TeacherDashboard(){
       
       console.log('Navigating with students:', students);
       
+      // Transform students data to match SubjectDetails component expectations
+      const transformedStudents = students.map(student => ({
+        ...student,
+        attendance: {
+          percentage: student.attendance_percentage || 0,
+          present_count: student.present_count || 0,
+          total_classes: student.total_classes || 0
+        }
+      }));
+      
       navigate(`/departments/${slugify(course.department)}/${slugify(course.subject)}`, { 
         state: { 
           course: `${course.department} - ${course.subject}`,
-          students: students,
+          students: transformedStudents,
           courseInfo: course,
           classId: course.id
         } 
@@ -479,7 +504,7 @@ function TeacherDashboard(){
       </div>
 
       {/* Overview Cards - Updated with Notification Stats */}
-      <div className="grid md:grid-cols-4 gap-6 mb-6">
+      <div id="overview" className="grid md:grid-cols-4 gap-6 mb-6">
         <div className="bg-white shadow-md rounded-xl p-5">
           <h2 className="font-semibold text-gray-700">My Courses</h2>
           <p className="mt-1 text-blue-900 font-medium">
@@ -507,7 +532,7 @@ function TeacherDashboard(){
           </div>
         </div>
 
-        <div className="bg-white shadow-md rounded-xl p-5 text-center">
+        <div id="requests" className="bg-white shadow-md rounded-xl p-5 text-center">
           <h2 className="font-semibold text-gray-700">Pending Attendance Requests</h2>
           <p className="text-3xl text-red-600 font-bold mt-2">{stats.pending_requests || 0}</p>
           <p className="text-gray-500 text-sm">Awaiting approval</p>
@@ -519,7 +544,7 @@ function TeacherDashboard(){
           </button>
         </div>
 
-        <div className="bg-white shadow-md rounded-xl p-5 text-center">
+        <div id="notifications" className="bg-white shadow-md rounded-xl p-5 text-center">
           <h2 className="font-semibold text-gray-700">Total Students</h2>
           <p className="text-3xl font-bold mt-2 text-blue-600">
             {stats.student_count || courses.reduce((total, course) => total + (course.student_count || 0), 0)}
@@ -545,7 +570,7 @@ function TeacherDashboard(){
 
       {/* Rest of the component remains the same */}
       {/* My Courses Table */}
-      <div className="bg-white shadow-md rounded-xl p-5 mb-6">
+      <div id="courses" className="bg-white shadow-md rounded-xl p-5 mb-6">
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-lg font-bold text-blue-900">📘 My Courses</h2>
           {selectedDept !== 'All Departments' && (
@@ -632,7 +657,7 @@ function TeacherDashboard(){
       </div>
 
       {/* Weekly Schedule */}
-      <div className="bg-white shadow-md rounded-xl p-5 mb-6">
+      <div id="schedule" className="bg-white shadow-md rounded-xl p-5 mb-6">
         <h2 className="text-lg font-bold text-blue-900 mb-3">📅 Weekly Schedule</h2>
         {weeklySchedule.length === 0 ? (
           <p className="text-gray-600">No weekly schedule assigned. Contact admin.</p>
@@ -671,7 +696,7 @@ function TeacherDashboard(){
       </div>
 
       {/* Attendance Analytics */}
-      <div className="bg-white shadow-md rounded-xl p-5 mb-6">
+      <div id="analytics" className="bg-white shadow-md rounded-xl p-5 mb-6">
         <h2 className="text-lg font-bold text-blue-900 mb-3">📊 Attendance Analytics</h2>
         <AttendanceAnalytics />
       </div>

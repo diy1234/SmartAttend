@@ -207,7 +207,7 @@ def init_db():
         user_id INTEGER NOT NULL,
         title TEXT NOT NULL,
         message TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('class_scheduled', 'attendance_request', 'system', 'alert')),
+        type TEXT NOT NULL CHECK(type IN ('class_scheduled', 'attendance_request', 'system', 'alert', 'contact_message', 'attendance_warning')),
         related_id INTEGER,  -- ID of related entity (schedule_id, request_id, etc.)
         is_read BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -227,8 +227,16 @@ def init_db():
         UNIQUE (teacher_id, subject_id)
     )
 ''')
-    
-
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS contact_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'new',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+''')
     
     cursor.execute('PRAGMA table_info(attendance)')
     attendance_columns = [col[1] for col in cursor.fetchall()]

@@ -18,6 +18,7 @@ api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
+
     console.log(`🔄 API Call: ${config.method?.toUpperCase()} ${config.url}`);
     return config;
   },
@@ -30,10 +31,7 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    console.error(
-      "❌ API Error:",
-      error.response?.data || error.message
-    );
+    console.error("❌ API Error:", error.response?.data || error.message);
 
     if (error.response?.status === 401) {
       localStorage.removeItem("token");
@@ -49,8 +47,8 @@ api.interceptors.response.use(
 //  AUTH
 // =====================================================
 export const login = (data) => api.post("/auth/login", data).then((r) => r.data);
-export const signup = (data) =>
-  api.post("/auth/signup", data).then((r) => r.data);
+export const signup = (data) => api.post("/auth/signup", data).then((r) => r.data);
+
 export const getUserProfile = (userId) =>
   api.get(`/users/profile?user_id=${userId}`).then((r) => r.data);
 
@@ -63,6 +61,14 @@ export const getAttendances = (params) =>
 export const markAttendanceSingle = (data) =>
   api.post("/attendance", data).then((r) => r.data);
 
+// --- NEW: Get student attendance % for a subject ---
+export const getStudentAttendancePercent = (studentId, subject) =>
+  api
+    .get("/attendance/student-percent", {
+      params: { student_id: studentId, subject },
+    })
+    .then((r) => r.data);
+
 // =====================================================
 //  CLASSES
 // =====================================================
@@ -70,7 +76,7 @@ export const getClasses = () =>
   api.get("/classes").then((r) => r.data.classes || r.data);
 
 // =====================================================
-//  ATTENDANCE REQUESTS (Student → Teacher/Admin)
+//  ATTENDANCE REQUESTS
 // =====================================================
 export const getPendingRequests = (teacherId) =>
   api
@@ -78,25 +84,27 @@ export const getPendingRequests = (teacherId) =>
     .then((r) => r.data);
 
 export const approveAttendanceRequest = (requestId, processor) =>
-  api
-    .post(
-      `/attendance-requests/requests/${requestId}/approve`,
-      processor || {}
-    )
+  api.post(`/attendance-requests/requests/${requestId}/approve`, processor || {})
     .then((r) => r.data);
 
 export const rejectAttendanceRequest = (requestId, processor) =>
-  api
-    .post(`/attendance-requests/requests/${requestId}/reject`, processor || {})
+  api.post(`/attendance-requests/requests/${requestId}/reject`, processor || {})
     .then((r) => r.data);
 
-// =====================================================
-//  ADMIN — PROCESSED REQUESTS (for AttendanceHistory.js)
-// =====================================================
+// --- Admin processed history ---
 export const getProcessedAttendanceRequests = (params) =>
+  api.get(`/attendance-history/processed`, { params }).then((r) => r.data || []);
+
+// =====================================================
+//  SUBJECT STUDENTS (used in ManageDepartments → View)
+// =====================================================
+
+export const getSubjectStudents = (dept, subject) =>
   api
-    .get(`/attendance-history/processed`, { params })
-    .then((r) => r.data || []);
+    .get("/admin/subject-students", {
+      params: { dept, subject },
+    })
+    .then((r) => r.data.students || []);
 
 // =====================================================
 //  DEPARTMENTS
@@ -118,37 +126,46 @@ export const deleteDepartment = (deptName) =>
 // =====================================================
 export const getSubjects = (departmentId = "") =>
   api
-    .get(`/subjects/${departmentId ? `?department_id=${departmentId}` : ""}`)
+    .get(
+      `/subjects/${departmentId ? `?department_id=${departmentId}` : ""}`
+    )
     .then((r) => r.data);
 
 export const createSubject = (deptName, subjectName) =>
-  api.post(`/departments/${deptName}/subjects/add`, { subject: subjectName }).then((r) => r.data);
+  api
+    .post(`/departments/${deptName}/subjects/add`, { subject: subjectName })
+    .then((r) => r.data);
 
 export const updateSubject = (id, data) =>
   api.put(`/subjects/${id}`, data).then((r) => r.data);
 
 export const deleteSubject = (deptName, subjectName) =>
-  api.post(`/departments/${deptName}/subjects/remove`, { subject: subjectName }).then((r) => r.data);
+  api
+    .post(`/departments/${deptName}/subjects/remove`, { subject: subjectName })
+    .then((r) => r.data);
 
-// assign teacher → subject
-
-
+// =====================================================
+//  TEACHER–SUBJECT TABLE
+// =====================================================
 export const assignTeacherToSubject = (teacher_id, subject_id, department_id) =>
-  api.post('/teacher-subjects', { teacher_id, subject_id, department_id }).then((r) => r.data);
+  api
+    .post("/teacher-subjects", { teacher_id, subject_id, department_id })
+    .then((r) => r.data);
 
 export const getTeacherSubjects = (teacher_id) =>
   api.get(`/teacher-subjects/teacher/${teacher_id}`).then((r) => r.data);
 
 export const removeTeacherSubject = (assignment_id) =>
   api.delete(`/teacher-subjects/${assignment_id}`).then((r) => r.data);
+
 // =====================================================
-//  TEACHERS LIST (needed for ManageSubjects + WeeklySchedule)
+//  TEACHER LIST
 // =====================================================
 export const getTeacherProfiles = () =>
   api.get("/admin/teachers").then((r) => r.data);
 
 // =====================================================
-//  WEEKLY SCHEDULE (Classroom-based timetable)
+//  WEEKLY SCHEDULE
 // =====================================================
 export const listSchedules = (params) =>
   api.get("/schedules/schedules", { params }).then((r) => r.data);
@@ -166,15 +183,18 @@ export const getScheduleForClass = (classId) =>
   api.get(`/schedules/schedules/class/${classId}`).then((r) => r.data);
 
 // =====================================================
-// Export default for compatibility with old imports
+//  DEFAULT EXPORT (old compatibility)
 // =====================================================
 export default {
   api,
+
   login,
   signup,
   getUserProfile,
+
   getAttendances,
   markAttendanceSingle,
+
   getClasses,
 
   getPendingRequests,
@@ -191,8 +211,8 @@ export default {
   createSubject,
   updateSubject,
   deleteSubject,
-  assignTeacherToSubject,
 
+  assignTeacherToSubject,
   getTeacherSubjects,
   removeTeacherSubject,
   getTeacherProfiles,
@@ -202,6 +222,10 @@ export default {
   updateSchedule,
   deleteSchedule,
   getScheduleForClass,
+
+  // ➤ NEW ADDITIONS
+  getStudentAttendancePercent,
+  getSubjectStudents,
 };
 
 export { api };
