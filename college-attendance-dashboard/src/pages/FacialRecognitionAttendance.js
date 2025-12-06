@@ -206,19 +206,51 @@ const markAttendance = async (studentId, studentName, confidence) => {
 
       const data = await response.json();
 
-      if (data.success && data.recognized_faces.length > 0) {
-        const enrolledIds = new Set((students || []).map(s => s.id));
-        data.recognized_faces.forEach(face => {
-          if (face.student_id && enrolledIds.has(face.student_id) && !attendanceMarked.includes(face.student_id) && !pendingMarks.includes(face.student_id)) {
-            // set pending immediately and then mark
-            setPendingMarks(prev => Array.from(new Set([...prev, face.student_id])));
-            markAttendance(face.student_id, face.name, face.confidence);
-          } else if (face.student_id && !enrolledIds.has(face.student_id)) {
-            console.warn('Ignored recognition for non-enrolled student:', face.name);
+      if (data.success) {
+        if (data.recognized_faces.length > 0) {
+          // Only accept recognized faces that are enrolled in this class
+          const enrolledIds = new Set((students || []).map(s => s.id));
+
+          // Filter out students not enrolled, already marked, or currently pending
+          const newRecognizedFaces = data.recognized_faces.filter(face => 
+            face.student_id &&
+            enrolledIds.has(face.student_id) &&
+            !attendanceMarked.includes(face.student_id) &&
+            !pendingMarks.includes(face.student_id)
+          );
+
+          // Log ignored recognized faces that are not enrolled (for debugging)
+          const ignored = data.recognized_faces.filter(face => face.student_id && !enrolledIds.has(face.student_id));
+          if (ignored.length > 0) {
+            console.warn('Ignored recognition for non-enrolled students:', ignored.map(f => f.name));
           }
-        });
+
+          if (newRecognizedFaces.length > 0) {
+            // Deduplicate recognizedFaces state by student_id and keep most recent
+            setRecognizedFaces(prev => {
+              const existingIds = new Set(prev.map(f => f.student_id));
+              const toAdd = [];
+              for (const f of newRecognizedFaces) {
+                if (!existingIds.has(f.student_id)) {
+                  toAdd.push(f);
+                  existingIds.add(f.student_id);
+                }
+              }
+              const merged = [...toAdd, ...prev];
+              return merged.slice(0, 10); // keep last 10
+            });
+
+            // Mark attendance but first mark them as pending to avoid duplicate calls
+            newRecognizedFaces.forEach(face => {
+              setPendingMarks(prev => Array.from(new Set([...prev, face.student_id])));
+              markAttendance(face.student_id, face.name, face.confidence);
+            });
+          }
+        } else {
+          showToast('No students recognized in this capture', 'info');
+        }
       } else {
-        showToast('No students recognized in this capture', 'info');
+        console.error('Recognition error:', data.error);
       }
     } catch (error) {
       console.error('Single capture error:', error);
@@ -317,31 +349,13 @@ const markAttendance = async (studentId, studentName, confidence) => {
           </div>
 
           <div className="flex gap-4 mt-4">
-            {!isScanning ? (
-              <>
-                <button
-                  onClick={startScanning}
-                  disabled={!isCameraReady || processing}
-                  className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
-                >
-                  {processing ? 'Processing...' : 'Start Auto Scan'}
-                </button>
-                <button
-                  onClick={captureSingle}
-                  disabled={!isCameraReady || processing}
-                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {processing ? 'Processing...' : 'Single Capture'}
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={stopScanning}
-                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
-              >
-                Stop Scanning
-              </button>
-            )}
+            <button
+              onClick={captureSingle}
+              disabled={!isCameraReady || processing}
+              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {processing ? 'Processing...' : 'Single Capture'}
+            </button>
           </div>
 
           {isScanning && (

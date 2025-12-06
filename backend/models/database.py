@@ -122,10 +122,72 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (student_id) REFERENCES students (id),
             FOREIGN KEY (class_id) REFERENCES classes (id),
-            FOREIGN KEY (marked_by) REFERENCES users (id),
-            UNIQUE(student_id, class_id, attendance_date)
+            FOREIGN KEY (marked_by) REFERENCES users (id)
         )
     ''')
+
+    # Ensure older databases that had a UNIQUE constraint on
+    # (student_id, class_id, attendance_date) are migrated to allow
+    # multiple attendance records per student per day (multiple periods).
+    # SQLite doesn't allow dropping a UNIQUE constraint directly, so
+    # perform a safe table migration if an autoindex (unique index)
+    # exists for that constraint.
+    cursor.execute("PRAGMA index_list('attendance')")
+    indexes = cursor.fetchall()
+    unique_index_found = False
+    for idx in indexes:
+        # idx format: (seq, name, unique)
+        if idx[2] == 1:
+            unique_index_found = True
+            break
+
+    if unique_index_found:
+        print('🔧 Migrating attendance table to remove UNIQUE constraint to allow multiple marks per day...')
+        # Turn off foreign keys while migrating
+        cursor.execute('PRAGMA foreign_keys=OFF')
+
+        # Create a new table without UNIQUE constraint and with any recent columns
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS attendance_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                class_id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                department TEXT,
+                course TEXT,
+                attendance_date DATE NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('present', 'absent')),
+                method TEXT,
+                photo TEXT,
+                marked_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                request_id INTEGER,
+                marked_via_request BOOLEAN DEFAULT FALSE,
+                FOREIGN KEY (student_id) REFERENCES students (id),
+                FOREIGN KEY (class_id) REFERENCES classes (id),
+                FOREIGN KEY (marked_by) REFERENCES users (id)
+            )
+        ''')
+
+        # Copy existing data into the new table (if columns exist)
+        try:
+            cursor.execute('''
+                INSERT INTO attendance_new (id, student_id, class_id, subject, department, course, attendance_date, status, method, photo, marked_by, created_at)
+                SELECT id, student_id, class_id, subject, department, course, attendance_date, status, method, photo, marked_by, created_at FROM attendance
+            ''')
+        except Exception:
+            # Fallback: try copying without id (let SQLite autogenerate)
+            cursor.execute('''
+                INSERT INTO attendance_new (student_id, class_id, subject, department, course, attendance_date, status, method, photo, marked_by, created_at)
+                SELECT student_id, class_id, subject, department, course, attendance_date, status, method, photo, marked_by, created_at FROM attendance
+            ''')
+
+        # Drop old table and rename new
+        cursor.execute('DROP TABLE IF EXISTS attendance')
+        cursor.execute('ALTER TABLE attendance_new RENAME TO attendance')
+
+        # Re-enable foreign keys
+        cursor.execute('PRAGMA foreign_keys=ON')
     
     # Face encodings table
     cursor.execute('''

@@ -78,9 +78,16 @@ def get_teacher_courses():
         
         classes = cursor.fetchall()
         
-        # Format the response for frontend
+        # Format the response for frontend and remove duplicate subjects
         formatted_courses = []
+        seen_subjects = set()
         for cls in classes:
+            subj = cls['subject'] or cls['class_name']
+            # Skip duplicate subject entries (keep the first occurrence)
+            if subj in seen_subjects:
+                continue
+            seen_subjects.add(subj)
+
             formatted_courses.append({
                 'id': cls['id'],
                 'class_name': cls['class_name'],
@@ -95,7 +102,7 @@ def get_teacher_courses():
         
         conn.close()
         
-        print(f"📚 Returning {len(formatted_courses)} courses for teacher {teacher_id}")
+        print(f"Returning {len(formatted_courses)} courses for teacher {teacher_id}")
         for course in formatted_courses:
             print(f"  - Course: {course['course']}, Subject: {course['subject']}, Students: {course['student_count']}")
         
@@ -403,7 +410,7 @@ def mark_attendance():
         attendance_data = data.get('attendance')  # List of {student_id, status}
         marked_by = data.get('teacher_id')  # Teacher user ID from request
         
-        print(f"📝 Marking attendance - Class: {class_id}, Date: {attendance_date}, Records: {len(attendance_data)}")
+        print(f"Marking attendance - Class: {class_id}, Date: {attendance_date}, Records: {len(attendance_data)}")
         
         if not all([class_id, attendance_date, attendance_data, marked_by]):
             return jsonify({'error': 'Missing required fields'}), 400
@@ -419,11 +426,11 @@ def mark_attendance():
             # If no teacher profile exists, still allow marking using the teacher user ID
             teacher_profile_id = None
             teacher_user_id = marked_by
-            print(f"⚠️ No teacher profile found for user_id: {marked_by}")
+            print(f"No teacher profile found for user_id: {marked_by}")
         else:
             teacher_profile_id = teacher_profile['id']
             teacher_user_id = teacher_profile['user_id']
-            print(f"👨‍🏫 Teacher profile found: {teacher_profile_id}")
+            print(f"Teacher profile found: {teacher_profile_id}")
         
         # Get class details with course and subject info
         cursor.execute('''
@@ -466,7 +473,7 @@ def mark_attendance():
         course = class_info['course']
         department = class_info['department']
         
-        print(f"📚 Class info - Subject: {subject}, Course: {course}, Department: {department}")
+        print(f"Class info - Subject: {subject}, Course: {course}, Department: {department}")
         
         # Mark attendance for each student
         success_count = 0
@@ -489,44 +496,98 @@ def mark_attendance():
                     errors.append(f"Student not found: {student_id}")
                     continue
                 
-                # Check if attendance already exists for this date
-                cursor.execute('''
-                    SELECT id FROM attendance 
-                    WHERE student_id = ? AND class_id = ? AND attendance_date = ?
-                ''', (student_id, class_id, attendance_date))
-                
-                existing = cursor.fetchone()
-                
-                if existing:
-                    # Update existing attendance (store the teacher's user id in marked_by)
-                    cursor.execute('''
-                        UPDATE attendance 
-                        SET status = ?, marked_by = ?, subject = ?, department = ?, course = ?, created_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    ''', (status, teacher_user_id, subject, department, course, existing['id']))
-                    print(f"🔄 Updated attendance for student {student_id}")
-                else:
-                    # Insert new attendance
+                # If the teacher is marking the student PRESENT, allow creating
+                # a new attendance row for the same date (multiple periods per day).
+                # For other statuses (e.g., 'absent') preserve the old behavior
+                # of updating an existing record if one exists for the date.
+                if status and status.lower() == 'present':
                     cursor.execute('''
                         INSERT INTO attendance 
                         (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (student_id, class_id, attendance_date, status, teacher_user_id, subject, department, course))
-                    print(f"✅ Created new attendance for student {student_id}")
+                    print(f"Created new attendance (present) for student {student_id}")
+                else:
+                    # Check if attendance already exists for this date
+                    cursor.execute('''
+                        SELECT id FROM attendance 
+                        WHERE student_id = ? AND class_id = ? AND attendance_date = ?
+                    ''', (student_id, class_id, attendance_date))
+                    existing = cursor.fetchone()
+
+                    if existing:
+                        # Update existing attendance (store the teacher's user id in marked_by)
+                        cursor.execute('''
+                            UPDATE attendance 
+                            SET status = ?, marked_by = ?, subject = ?, department = ?, course = ?, created_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ''', (status, teacher_user_id, subject, department, course, existing['id']))
+                        print(f"Updated attendance for student {student_id}")
+                    else:
+                        # Insert new attendance for non-present status
+                        cursor.execute('''
+                            INSERT INTO attendance 
+                            (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (student_id, class_id, attendance_date, status, teacher_user_id, subject, department, course))
+                        print(f"Created new attendance for student {student_id}")
                 
                 success_count += 1
                 
             except sqlite3.Error as e:
                 error_msg = f"Failed to mark attendance for student {student_id}: {str(e)}"
                 errors.append(error_msg)
-                print(f"❌ {error_msg}")
-        
+                print(f"Error: {error_msg}")
+
+        # After processing explicit attendance entries (recognized / manually marked),
+        # mark all other enrolled students as 'absent' for this class/date if they
+        # do not already have an attendance record for the date.
+        try:
+            processed_ids = set([r.get('student_id') for r in attendance_data if r.get('student_id')])
+
+            cursor.execute('SELECT student_id FROM enrollment WHERE class_id = ?', (class_id,))
+            enrolled_students = cursor.fetchall()
+
+            absent_count = 0
+            for e in enrolled_students:
+                sid = e['student_id']
+                if sid in processed_ids:
+                    continue
+
+                # Check if an attendance record already exists for this date
+                cursor.execute('''
+                    SELECT id, status FROM attendance
+                    WHERE student_id = ? AND class_id = ? AND attendance_date = ?
+                ''', (sid, class_id, attendance_date))
+                existing = cursor.fetchone()
+
+                # Only insert an 'absent' record if none exists for the date.
+                # Do not overwrite existing 'present' records.
+                if not existing:
+                    cursor.execute('''
+                        INSERT INTO attendance
+                        (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (sid, class_id, attendance_date, 'absent', teacher_user_id, subject, department, course))
+                    absent_count += 1
+                    print(f"Marked absent (not recognized/marked) for student {sid}")
+
+            # Include absent_count in response
+            if absent_count > 0:
+                response_absent_msg = f' and marked {absent_count} student(s) absent'
+            else:
+                response_absent_msg = ''
+
+        except sqlite3.Error as e:
+            print(f"Error while marking absentees: {str(e)}")
+
         conn.commit()
         conn.close()
         
         response = {
-            'message': f'Attendance marked successfully for {success_count} students',
+            'message': f'Attendance marked successfully for {success_count} students{response_absent_msg}',
             'success_count': success_count,
+            'absent_count': absent_count if 'absent_count' in locals() else 0,
             'class_id': class_id,
             'date': attendance_date
         }
@@ -534,13 +595,13 @@ def mark_attendance():
         if errors:
             response['errors'] = errors
         
-        print(f"🎉 Attendance marking completed - Success: {success_count}, Errors: {len(errors)}")
+        print(f"Attendance marking completed - Success: {success_count}, Errors: {len(errors)}")
         return jsonify(response), 200
         
     except Exception as e:
-        print(f"❌ Error in mark_attendance: {str(e)}")
+        print(f"Error in mark_attendance: {str(e)}")
         import traceback
-        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        print(f"Full traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 @teacher_dashboard_bp.route('/attendance-summary/<int:class_id>', methods=['GET'])

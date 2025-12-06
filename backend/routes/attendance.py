@@ -195,7 +195,10 @@ def get_attendance_analytics():
         # Get subject-wise statistics - FIXED: Use classes table
         cursor.execute(f'''
             SELECT 
-                c.class_name as subject_name,
+                COALESCE(
+                    (SELECT DISTINCT e.subject FROM enrollment e WHERE e.class_id = c.id LIMIT 1),
+                    c.class_name
+                ) as subject_name,
                 a.department as department_name,
                 COUNT(*) as total,
                 SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present_count,
@@ -203,7 +206,7 @@ def get_attendance_analytics():
             FROM attendance a
             JOIN classes c ON a.class_id = c.id
             WHERE c.teacher_id = ? {date_filter}
-            GROUP BY c.class_name, a.department
+            GROUP BY subject_name, a.department
         ''', (teacher_profile_id,))
         
         subject_stats = [dict(row) for row in cursor.fetchall()]
@@ -213,14 +216,17 @@ def get_attendance_analytics():
         cursor.execute(f'''
             SELECT 
                 date(a.attendance_date) as date,
-                c.class_name as subject_name,
+                COALESCE(
+                    (SELECT DISTINCT e.subject FROM enrollment e WHERE e.class_id = c.id LIMIT 1),
+                    c.class_name
+                ) as subject_name,
                 COUNT(*) as total,
                 SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present_count,
                 SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) as absent_count
             FROM attendance a
             JOIN classes c ON a.class_id = c.id
             WHERE c.teacher_id = ? {date_filter}
-            GROUP BY date(a.attendance_date), c.class_name
+            GROUP BY date(a.attendance_date), subject_name
             ORDER BY a.attendance_date DESC
         ''', (teacher_profile_id,))
         

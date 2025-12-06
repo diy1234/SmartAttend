@@ -339,7 +339,19 @@ def recognize_faces():
                         ''', (class_id, face['student_id']))
                         
                         if cursor.fetchone():
-                            enrolled_students.append(face)
+                            # Also skip students who are already marked PRESENT for
+                            # this class on today's date to avoid duplicate recognition
+                            cursor.execute('''
+                                SELECT 1 FROM attendance
+                                WHERE student_id = ? AND class_id = ? AND attendance_date = date('now') AND status = 'present'
+                                LIMIT 1
+                            ''', (face['student_id'], class_id))
+
+                            already_marked = cursor.fetchone()
+                            if already_marked:
+                                print(f"⏭️ Skipping already marked student {face.get('student_id')} for class {class_id}")
+                            else:
+                                enrolled_students.append(face)
                         else:
                             print(f"❌ Student {face.get('student_id')} not enrolled in class {class_id}")
                 
