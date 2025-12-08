@@ -25,30 +25,20 @@ export default function StudentReport() {
 
       console.log("📊 Fetching attendance report for user:", userId);
 
-      // Try multiple endpoint variations
-      const endpoints = [
-        `/api/attendance/student/${userId}`,
-        `/attendance/student/${userId}`,
-        `/api/attendance?student_id=${userId}`,
-        `/attendance?student_id=${userId}`
-      ];
-
-      let response = null;
-      let successfulEndpoint = null;
-
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`   Trying endpoint: ${endpoint}`);
-          response = await api.get(endpoint);
-          if (response.data && (response.data.attendances || response.data.success || Array.isArray(response.data))) {
-            successfulEndpoint = endpoint;
-            console.log(`   ✅ Success with endpoint: ${endpoint}`);
-            break;
-          }
-        } catch (err) {
-          console.log(`   ❌ Failed with endpoint: ${endpoint}`, err.response?.data || err.message);
-        }
+      // First, fetch dashboard to get the actual student_id (not user_id)
+      const dashRes = await api.get(`/student/dashboard/${userId}`);
+      const studentId = dashRes.data?.profile?.student_id;
+      
+      if (!studentId) {
+        setError('Could not determine student ID. Please try again.');
+        setLoading(false);
+        return;
       }
+
+      console.log("📋 Using student_id:", studentId);
+
+      // Now fetch attendance records using the correct student_id
+      const response = await api.get(`/attendance/student/${studentId}`);
 
       if (!response || !response.data) {
         setError('Could not load attendance data from server');
@@ -69,6 +59,11 @@ export default function StudentReport() {
       }
 
       console.log("✅ Processed attendance records:", attendances.length);
+      
+      // Debug log to check what subjects are in the data
+      const subjectsInData = [...new Set(attendances.map(a => a.subject).filter(Boolean))];
+      console.log("📚 Subjects found in attendance data:", subjectsInData);
+      
       setAttendanceData(attendances);
 
     } catch (error) {
@@ -89,6 +84,7 @@ export default function StudentReport() {
     const summary = {};
     
     attendanceData.forEach(record => {
+      // Use subject from the attendance record (do NOT fall back to class_name)
       const subject = record.subject || 'Unknown Subject';
       const department = record.department || 'General';
       const key = `${department}||${subject}`;
