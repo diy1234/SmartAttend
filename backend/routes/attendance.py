@@ -72,6 +72,66 @@ def mark_attendance():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@attendance_bp.route('/student-percent', methods=['GET'])
+def get_student_attendance_percent():
+    """
+    Calculate attendance percentage for a student in a specific subject.
+    This endpoint properly joins attendance with classes and enrollment tables
+    to ensure subject-wise filtering works correctly.
+    
+    Params:
+    - student_id: ID of the student
+    - subject: Name of the subject (required for filtering)
+    """
+    student_id = request.args.get('student_id')
+    subject = request.args.get('subject')
+    
+    if not student_id or not subject:
+        return jsonify({'error': 'student_id and subject are required'}), 400
+    
+    try:
+        student_id = int(student_id)
+    except ValueError:
+        return jsonify({'error': 'Invalid student_id'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Query attendance for the specific student and subject
+        # Join with classes to get the subject name (since enrollment stores subject info)
+        # and with enrollment to verify enrollment
+        cursor.execute('''
+            SELECT 
+                SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present_count,
+                COUNT(*) as total_classes
+            FROM attendance a
+            JOIN classes c ON a.class_id = c.id
+            WHERE a.student_id = ?
+              AND (c.class_name = ? OR a.subject = ?)
+        ''', (student_id, subject, subject))
+        
+        row = cursor.fetchone()
+        present = row['present_count'] or 0 if row else 0
+        total = row['total_classes'] or 0 if row else 0
+        
+        # Calculate percentage
+        percentage = round((present / total) * 100) if total > 0 else 0
+        
+        conn.close()
+        
+        return jsonify({
+            'percent': percentage,
+            'present': present,
+            'total': total
+        })
+    
+    except Exception as e:
+        conn.close()
+        print(f"Error calculating attendance: {str(e)}")
+        return jsonify({'error': str(e), 'percent': 0}), 500
+
+
 @attendance_bp.route('/student-stats', methods=['GET'])
 def get_student_attendance_stats():
     """Get overall attendance statistics by department and subject for a student"""

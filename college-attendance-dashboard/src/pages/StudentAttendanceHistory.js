@@ -108,7 +108,7 @@ export default function StudentAttendanceHistory() {
   };
 
   const MethodIcon = ({ rec }) => {
-    if (rec.method === "face_recognition") return <>👤</>;
+    if (rec.method === "face_recognition") return <>🔍</>;
     if (rec.method === "manual") return <>✍️</>;
     if (rec.marked_via_request && rec.status === "present") return <>✅</>;
     if (rec.marked_via_request && rec.status === "absent") return <>❌</>;

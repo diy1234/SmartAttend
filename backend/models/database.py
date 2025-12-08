@@ -104,7 +104,7 @@ def init_db():
             UNIQUE(student_id, class_id)
         )
     ''')
-    
+
     # Attendance table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS attendance (
@@ -300,6 +300,16 @@ def init_db():
 );
 ''')
     
+    # Add subject_id to enrollment if not exists
+    cursor.execute("PRAGMA table_info(enrollment)")
+    enrollment_cols = [col[1] for col in cursor.fetchall()]
+    
+    if "subject_id" not in enrollment_cols:
+        cursor.execute("ALTER TABLE enrollment ADD COLUMN subject_id INTEGER REFERENCES subjects(id)")
+        print("✅ Added subject_id column to enrollment table")
+
+
+
     cursor.execute('PRAGMA table_info(attendance)')
     attendance_columns = [col[1] for col in cursor.fetchall()]
     if 'request_id' not in attendance_columns:

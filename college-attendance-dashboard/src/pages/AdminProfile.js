@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useContext } from "react";
 import UserContext from "../context/UserContext";
+import apiModule from "../services/api";
+
+const api = apiModule.api;
 
 function AdminProfile() {
   const { user: ctxUser, setUser: setCtxUser } = useContext(UserContext);
@@ -38,12 +41,40 @@ function AdminProfile() {
     if (file) reader.readAsDataURL(file);
   };
 
-  const handleSave = () => {
-    localStorage.setItem("user", JSON.stringify(user));
-    // update context so Navbar updates immediately
-    if (setCtxUser) setCtxUser(user);
-    setEditMode(false);
-    alert("Profile updated successfully!");
+  const handleSave = async () => {
+    try {
+      if (!user.id) {
+        alert('❌ Error: User ID not found. Please log in again.');
+        return;
+      }
+
+      console.log('📤 Sending admin profile update:', { user_id: user.id, name: user.name, email: user.email, phone: user.phone });
+
+      // Call backend to save admin profile
+      const response = await api.put("/users/update-profile", {
+        user_id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+      });
+
+      console.log('✅ API Response:', response);
+
+      // Backend returns 200 with {success: true, message: '...'} on success
+      // Update localStorage with the response
+      localStorage.setItem("user", JSON.stringify(user));
+      // update context so Navbar updates immediately
+      if (setCtxUser) setCtxUser(user);
+      setEditMode(false);
+      alert("✅ Profile updated successfully!");
+    } catch (error) {
+      console.error("❌ Error saving profile:", error);
+      alert("Error saving profile. Changes saved locally only.");
+      // Still update localStorage as fallback
+      localStorage.setItem("user", JSON.stringify(user));
+      if (setCtxUser) setCtxUser(user);
+      setEditMode(false);
+    }
   };
 
   return (

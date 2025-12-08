@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import UserContext from '../context/UserContext';
 import DataContext from '../context/DataContext';
 import ToastContext from '../context/ToastContext';
-import api, { getUserProfile } from '../services/api';
+import apiModule, { getUserProfile } from '../services/api';
+
+const api = apiModule.api;
 
 export default function StudentProfile(){
   const { user, setUser } = useContext(UserContext);
@@ -71,7 +73,21 @@ export default function StudentProfile(){
   const save = async () => {
     setLoading(true);
     try {
-      const response = await api.put(`/users/student-profile/${stored.id}`, form);
+      if (!stored.id) {
+        showToast('Error: User ID not found. Please log in again.', 'error', 3000);
+        setLoading(false);
+        return;
+      }
+
+      console.log('📤 Sending profile update:', { user_id: stored.id, ...form });
+
+      // Call the /users/update-profile endpoint which handles both users and students tables
+      const response = await api.put(`/users/update-profile`, {
+        user_id: stored.id,
+        ...form
+      });
+
+      console.log('✅ API Response:', response);
 
       // Build updated profile locally (optimistic)
       const updatedProfile = { ...(profileData || {}), ...form };
@@ -86,13 +102,14 @@ export default function StudentProfile(){
 
       setEditMode(false);
 
+      // Backend returns 200 with {success: true, message: '...'} on success
       if (response && response.data && response.data.success) {
-        showToast('Profile updated successfully', 'success', 3000);
+        showToast('✅ Profile updated successfully!', 'success', 3000);
       } else {
         showToast('Saved locally (server did not confirm).', 'warning', 4000);
       }
     } catch (error) {
-      console.error('Error updating profile:', error);
+      console.error('❌ Error updating profile:', error);
       // Still apply optimistic local update so UI shows changes
       const updatedProfile = { ...(profileData || {}), ...form };
       setProfileData(updatedProfile);

@@ -219,7 +219,7 @@ def update_profile():
         conn.commit()
         conn.close()
         
-        return jsonify({'message': 'Profile updated successfully'}), 200
+        return jsonify({'success': True, 'message': 'Profile updated successfully'}), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

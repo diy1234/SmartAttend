@@ -372,12 +372,21 @@ def get_course_attendance(class_id):
         # Format attendance data
         formatted_attendance = []
         for record in attendance_records:
+            # Convert raw method values into human-readable strings for the frontend
+            raw_method = (record['method'] or '').lower() if record['method'] is not None else ''
+            if raw_method in ("face", "facial"):
+                readable_method = "Facial Recognition"
+            elif raw_method == "request":
+                readable_method = "Attendance Request"
+            else:
+                readable_method = "Marked by Teacher"
+
             formatted_attendance.append({
                 'date': record['attendance_date'],
                 'student_name': record['student_name'],
                 'enrollment_no': record['enrollment_no'],
                 'status': record['status'],
-                'method': record['method'],
+                'method': readable_method,
                 'marked_at': record['created_at']
             })
         
