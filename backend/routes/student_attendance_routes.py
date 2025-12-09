@@ -21,6 +21,8 @@ def get_student_attendance(student_id):
                 a.attendance_date,
                 a.status,
                 a.method,
+                a.marked_via_request,
+                a.request_id,
                 a.created_at,
                 c.class_name,
                 tp.full_name as teacher_name

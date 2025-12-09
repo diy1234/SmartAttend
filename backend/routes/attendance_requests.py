@@ -204,29 +204,14 @@ def approve_attendance_request(request_id):
                 VALUES (?, ?, ?, ?, 'A', 1, '2024-2025')
             ''', (req['student_id'], class_id, req['subject'], req['department']))
         
-        # Mark attendance
+        # Mark attendance — append a new attendance record for the approved request
         cursor.execute('''
-            SELECT id FROM attendance 
-            WHERE student_id = ? AND class_id = ? AND attendance_date = ?
-        ''', (req['student_id'], class_id, req['request_date']))
-        
-        existing = cursor.fetchone()
-        
-        if existing:
-            cursor.execute('''
-                UPDATE attendance 
-                SET status='present', marked_by=?, marked_via_request=TRUE,
-                    request_id=?, subject=?, department=?, created_at=CURRENT_TIMESTAMP
-                WHERE id=?
-            ''', (req['teacher_id'], request_id, req['subject'], req['department'], existing['id']))
-        else:
-            cursor.execute('''
-                INSERT INTO attendance 
-                (student_id, class_id, attendance_date, status, marked_by, marked_via_request, 
-                 request_id, subject, department)
-                VALUES (?, ?, ?, 'present', ?, TRUE, ?, ?, ?)
-            ''', (req['student_id'], class_id, req['request_date'], req['teacher_id'],
-                  request_id, req['subject'], req['department']))
+            INSERT INTO attendance 
+            (student_id, class_id, attendance_date, status, marked_by, method, marked_via_request, 
+             request_id, subject, department)
+            VALUES (?, ?, ?, 'present', ?, 'attendance_request', TRUE, ?, ?, ?)
+        ''', (req['student_id'], class_id, req['request_date'], req['teacher_id'],
+              request_id, req['subject'], req['department']))
         
         # Update request
         cursor.execute('''

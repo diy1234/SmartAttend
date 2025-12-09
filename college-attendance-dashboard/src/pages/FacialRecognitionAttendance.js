@@ -157,9 +157,11 @@ const markAttendance = async (studentId, studentName, confidence) => {
         date: attendanceDate,
         attendance: [{
           student_id: studentId,
-          status: 'present'
+          status: 'present',
+          method: 'face_recognition'
         }],
-        teacher_id: teacherId
+        teacher_id: teacherId,
+        method: 'face_recognition'
       })
     });
 

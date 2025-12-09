@@ -487,10 +487,13 @@ def mark_attendance():
         # Mark attendance for each student
         success_count = 0
         errors = []
+        global_method = data.get('method', 'manual')  # Default to 'manual' for teacher marks
         
         for record in attendance_data:
             student_id = record.get('student_id')
             status = record.get('status')
+            # Use method from record if provided, otherwise use global method
+            method = record.get('method', global_method)
             
             if not all([student_id, status]):
                 errors.append(f"Invalid record: {record}")
@@ -505,42 +508,14 @@ def mark_attendance():
                     errors.append(f"Student not found: {student_id}")
                     continue
                 
-                # If the teacher is marking the student PRESENT, allow creating
-                # a new attendance row for the same date (multiple periods per day).
-                # For other statuses (e.g., 'absent') preserve the old behavior
-                # of updating an existing record if one exists for the date.
-                if status and status.lower() == 'present':
-                    cursor.execute('''
-                        INSERT INTO attendance 
-                        (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (student_id, class_id, attendance_date, status, teacher_user_id, subject, department, course))
-                    print(f"Created new attendance (present) for student {student_id}")
-                else:
-                    # Check if attendance already exists for this date
-                    cursor.execute('''
-                        SELECT id FROM attendance 
-                        WHERE student_id = ? AND class_id = ? AND attendance_date = ?
-                    ''', (student_id, class_id, attendance_date))
-                    existing = cursor.fetchone()
+                # Append a new attendance record for this action to preserve history
+                cursor.execute('''
+                    INSERT INTO attendance 
+                    (student_id, class_id, attendance_date, status, marked_by, method, subject, department, course)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (student_id, class_id, attendance_date, status, teacher_user_id, method, subject, department, course))
+                print(f"Appended attendance record for student {student_id}")
 
-                    if existing:
-                        # Update existing attendance (store the teacher's user id in marked_by)
-                        cursor.execute('''
-                            UPDATE attendance 
-                            SET status = ?, marked_by = ?, subject = ?, department = ?, course = ?, created_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                        ''', (status, teacher_user_id, subject, department, course, existing['id']))
-                        print(f"Updated attendance for student {student_id}")
-                    else:
-                        # Insert new attendance for non-present status
-                        cursor.execute('''
-                            INSERT INTO attendance 
-                            (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (student_id, class_id, attendance_date, status, teacher_user_id, subject, department, course))
-                        print(f"Created new attendance for student {student_id}")
-                
                 success_count += 1
                 
             except sqlite3.Error as e:
@@ -575,9 +550,9 @@ def mark_attendance():
                 if not existing:
                     cursor.execute('''
                         INSERT INTO attendance
-                        (student_id, class_id, attendance_date, status, marked_by, subject, department, course)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (sid, class_id, attendance_date, 'absent', teacher_user_id, subject, department, course))
+                        (student_id, class_id, attendance_date, status, marked_by, method, subject, department, course)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (sid, class_id, attendance_date, 'absent', teacher_user_id, 'manual', subject, department, course))
                     absent_count += 1
                     print(f"Marked absent (not recognized/marked) for student {sid}")
 

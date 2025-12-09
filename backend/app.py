@@ -61,6 +61,7 @@ from routes.admin_routes import admin_bp
 from routes.departments_routes import departments_bp
 from routes.admin_list_routes import admin_list_bp
 from routes.student_routes import student_bp
+from routes.student_attendance_routes import student_attendance_bp
 from routes.contact_routes import contact_bp
 
 from routes.teacher_subjects import teacher_subjects_bp
@@ -86,6 +87,7 @@ app.register_blueprint(admin_bp, url_prefix='/api')
 app.register_blueprint(departments_bp, url_prefix='/api/departments')
 app.register_blueprint(admin_list_bp, url_prefix='/api/admin')
 app.register_blueprint(student_bp, url_prefix='/api/student')
+app.register_blueprint(student_attendance_bp, url_prefix='/api')
 app.register_blueprint(contact_bp, url_prefix="/api/contact")
 app.register_blueprint(teacher_subjects_bp, url_prefix='/api')
 @app.route('/')
