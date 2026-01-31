@@ -33,6 +33,7 @@ export default function AdminDashboard() {
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(true);
+  const [activeDepartments, setActiveDepartments] = useState([]);
 
   // contexts
   const { user } = useContext(UserContext);
@@ -45,55 +46,59 @@ export default function AdminDashboard() {
   }, []);
 
   const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
+  setLoading(true);
 
-      const [statsRes, deptRes, distRes] = await Promise.all([
-        fetch("http://127.0.0.1:5000/api/admin/stats"),
-        fetch("http://127.0.0.1:5000/api/admin/department-attendance"),
-        fetch("http://127.0.0.1:5000/api/admin/attendance-distribution"),
-      ]);
-
-      if (!statsRes.ok || !deptRes.ok || !distRes.ok)
-        throw new Error("One or more API requests failed");
-
+  try {
+    const statsRes = await fetch("http://127.0.0.1:5000/api/admin/stats");
+    if (statsRes.ok) {
       const statsData = await statsRes.json();
-      const deptData = await deptRes.json();
-      const distData = await distRes.json();
-
       setStats({
-        total_students: statsData.total_students,
-        total_teachers: statsData.total_teachers,
-        total_departments: statsData.total_departments,
-        total_courses: statsData.total_courses || statsData.total_subjects,
-        avg_attendance: statsData.avg_attendance || 0,
+        total_students: Number(statsData.total_students),
+        total_teachers: Number(statsData.total_teachers),
+        total_departments: Number(statsData.total_departments),
+        total_courses: Number(statsData.total_courses),
+        avg_attendance: Number(statsData.avg_attendance),
       });
-
-      setDepartmentAttendance(deptData);
-      setDistribution(distData);
-    } catch (error) {
-      console.error("Error fetching dashboard data:", error);
-
-      // Fallback demo data if backend fails
-      setStats({
-        total_students: 45,
-        total_teachers: 8,
-        total_departments: 7,
-        total_courses: 15,
-        avg_attendance: 82,
-      });
-      setDepartmentAttendance([
-        { department: "Computer Science", percent: 85 },
-        { department: "Mathematics", percent: 78 },
-        { department: "Physics", percent: 72 },
-        { department: "Chemistry", percent: 88 },
-      ]);
-      setDistribution({ above_75: 60, below_75: 40 });
-    } finally {
-      setLoading(false);
-      setLastUpdated(new Date());
+    } else {
+      console.error("Stats API failed:", statsRes.status);
     }
-  };
+  } catch (e) {
+    console.error("Stats fetch error:", e);
+  }
+
+  try {
+    const deptRes = await fetch("http://127.0.0.1:5000/api/admin/department-attendance");
+    if (deptRes.ok) {
+      const deptData = await deptRes.json();
+      setDepartmentAttendance(deptData);
+    }
+  } catch (e) {
+    console.error("Department fetch error:", e);
+  }
+
+  try {
+    const distRes = await fetch("http://127.0.0.1:5000/api/admin/attendance-distribution");
+    if (distRes.ok) {
+      const distData = await distRes.json();
+      setDistribution(distData);
+    }
+  } catch (e) {
+    console.error("Distribution fetch error:", e);
+  }
+
+  try {
+  const deptListRes = await fetch("http://127.0.0.1:5000/api/admin/active-departments");
+  if (deptListRes.ok) {
+    const list = await deptListRes.json();
+    setActiveDepartments(list);
+  }} catch (e) {
+    console.error("Active departments fetch error:", e);
+  }
+
+  setLoading(false);
+  setLastUpdated(new Date());
+};
+
   // Notification helpers
   const fetchNotificationStats = async () => {
     try {
@@ -385,24 +390,27 @@ export default function AdminDashboard() {
           📚 Active Departments
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {departmentAttendance.length > 0 ? (
-            departmentAttendance.map((dept, idx) => (
-              <div
-                key={idx}
-                onClick={() =>
-                  navigate(`/department-subjects?dept=${encodeURIComponent(dept.department)}`)
-                }
-                className="cursor-pointer border p-4 rounded-lg hover:shadow-md hover:bg-gray-50 transition"
-              >
-                <div className="font-semibold text-gray-800">
-                  {dept.department}
-                </div>
-                <div className="text-sm text-gray-500">Active Department</div>
-              </div>
-            ))
-          ) : (
-            <div className="text-gray-500">No departments found.</div>
-          )}
+          {activeDepartments.length > 0 ? (
+  activeDepartments.map((dept, idx) => (
+    <div
+      key={idx}
+      onClick={() =>
+        navigate(`/department-subjects?dept=${encodeURIComponent(dept.department)}`)
+      }
+      className="cursor-pointer border p-4 rounded-lg hover:shadow-md hover:bg-gray-50 transition"
+    >
+      <div className="font-semibold text-gray-800">
+        {dept.department}
+      </div>
+      <div className="text-sm text-gray-500">
+        Subjects: {dept.total_subjects}
+      </div>
+    </div>
+  ))
+) : (
+  <div className="text-gray-500">No departments found.</div>
+)}
+
         </div>
       </div>
 

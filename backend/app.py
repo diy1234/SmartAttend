@@ -183,12 +183,13 @@ def debug_recent_attendance():
         cursor.execute('''
             SELECT a.id, a.student_id, a.class_id, a.attendance_date, a.status, 
                    a.created_at, u.name as student_name, c.subject, c.teacher_id,
-                   tp.full_name as teacher_name
+                   tu.name as teacher_name
             FROM attendance a
             JOIN students s ON a.student_id = s.id
             JOIN users u ON s.user_id = u.id
             JOIN classes c ON a.class_id = c.id
             LEFT JOIN teacher_profiles tp ON c.teacher_id = tp.id
+            LEFT JOIN users tu ON tp.user_id = tu.id
             ORDER BY a.created_at DESC
             LIMIT 10
         ''')
@@ -495,7 +496,7 @@ def test_face_recognition():
             'message': 'Test recognition successful'
         }
         
-        print("✅ Sending test response")
+        print("Sending test response")
         return jsonify(test_response)
         
     except Exception as e:
@@ -509,22 +510,22 @@ def check_face_registration_status(user_id):
     cursor = conn.cursor()
     
     try:
-        print(f"🔍 Checking face registration for user ID: {user_id}")
+        print(f"Checking face registration for user ID: {user_id}")
         
         cursor.execute('''
-            SELECT fe.id, fe.user_id, u.name, s.enrollment_no, s.id as student_id
+            SELECT fe.id, fe.student_id, u.name, s.enrollment_no, u.id as user_id
             FROM face_encodings fe
-            JOIN users u ON fe.user_id = u.id
-            LEFT JOIN students s ON u.id = s.user_id
-            WHERE fe.user_id = ?
+            JOIN students s ON fe.student_id = s.id
+            JOIN users u ON s.user_id = u.id
+            WHERE u.id = ?
         ''', (user_id,))
         
         face_exists = cursor.fetchone()
         
         if face_exists:
-            print(f"✅ Face found for user {user_id}: {face_exists['name']}")
+            print(f"Face found for user {user_id}: {face_exists['name']}")
         else:
-            print(f"❌ No face found for user {user_id}")
+            print(f"No face found for user {user_id}")
         
         return jsonify({
             'success': True,
@@ -536,7 +537,17 @@ def check_face_registration_status(user_id):
         })
         
     except Exception as e:
-        print(f"❌ Error checking face registration: {e}")
+        # If face_encodings table doesn't exist yet (safe startup), return a graceful response
+        import sqlite3
+        if isinstance(e, sqlite3.OperationalError) and 'no such table: face_encodings' in str(e):
+            print('Face encodings table missing; returning not-registered')
+            return jsonify({
+                'success': True,
+                'face_registered': False,
+                'message': 'Face registration data not available yet'
+            }), 200
+
+        print(f"Error checking face registration: {e}")
         return jsonify({
             'success': False, 
             'error': str(e),
@@ -613,9 +624,10 @@ def get_teacher_profile_by_user(user_id):
     
     try:
         cursor.execute('''
-            SELECT tp.id as profile_id, tp.user_id, u.name, u.email, tp.faculty_id, tp.department
+            SELECT tp.id as profile_id, tp.user_id, u.name, u.email, tp.faculty_id, COALESCE(d.name, '') AS department
             FROM teacher_profiles tp
             JOIN users u ON tp.user_id = u.id
+            LEFT JOIN departments d ON tp.department_id = d.id
             WHERE tp.user_id = ?
         ''', (user_id,))
         
@@ -699,14 +711,12 @@ def debug_attendance_requests():
     cursor = conn.cursor()
     
     try:
-        # Get all attendance requests
+        # Get all attendance requests with derived class/teacher/subject info
         cursor.execute('''
             SELECT 
                 ar.id,
                 ar.student_id,
-                ar.teacher_id,
-                ar.department,
-                ar.subject,
+                ar.class_id,
                 ar.request_date,
                 ar.reason,
                 ar.status,
@@ -715,18 +725,24 @@ def debug_attendance_requests():
                 s.enrollment_no,
                 u.name as student_name,
                 u.email as student_email,
-                tp.full_name as teacher_name
+                COALESCE(tu.name, '') as teacher_name,
+                COALESCE(subj.name, c.class_name) as subject,
+                COALESCE(d.name, '') as department
             FROM attendance_requests ar
             JOIN students s ON ar.student_id = s.id
             JOIN users u ON s.user_id = u.id
-            LEFT JOIN teacher_profiles tp ON ar.teacher_id = tp.id
+            LEFT JOIN classes c ON ar.class_id = c.id
+            LEFT JOIN teacher_profiles tp ON c.teacher_id = tp.id
+            LEFT JOIN users tu ON tp.user_id = tu.id
+            LEFT JOIN subjects subj ON c.subject_id = subj.id
+            LEFT JOIN departments d ON subj.department_id = d.id
             ORDER BY ar.created_at DESC
         ''')
         
         requests = cursor.fetchall()
         
-        # Get teacher profiles
-        cursor.execute('SELECT id, user_id, full_name FROM teacher_profiles')
+        # Get teacher profiles (user names)
+        cursor.execute('SELECT tp.id, tp.user_id, u.name as full_name FROM teacher_profiles tp JOIN users u ON tp.user_id = u.id')
         teachers = cursor.fetchall()
         
         # Get students
@@ -949,10 +965,11 @@ def get_student_attendance(student_id):
                 a.method,
                 a.created_at,
                 c.class_name,
-                tp.full_name as teacher_name
+                tu.name as teacher_name
             FROM attendance a
             LEFT JOIN classes c ON a.class_id = c.id
             LEFT JOIN teacher_profiles tp ON c.teacher_id = tp.id
+            LEFT JOIN users tu ON tp.user_id = tu.id
             WHERE a.student_id = ?
             ORDER BY a.attendance_date DESC
         ''', (student_id,))
@@ -1107,43 +1124,28 @@ def create_attendance_request():
 
 @app.route('/api/attendance-requests/student/<int:student_id>', methods=['GET'])
 def get_student_attendance_requests(student_id):
-    """Get all attendance requests for a specific student"""
+    """Get all attendance requests for a specific student (accepts student_id or user_id)"""
     from models.database import get_db_connection
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute('''
-            SELECT 
-                ar.id,
-                ar.student_id,
-                ar.teacher_id,
-                ar.department,
-                ar.subject,
-                ar.request_date,
-                ar.reason,
-                ar.status,
-                ar.created_at,
-                ar.responded_at,
-                tp.full_name as teacher_name
-            FROM attendance_requests ar
-            LEFT JOIN teacher_profiles tp ON ar.teacher_id = tp.id
-            WHERE ar.student_id = ?
-            ORDER BY ar.created_at DESC
-        ''', (student_id,))
-        
-        requests = cursor.fetchall()
-        result = [dict(req) for req in requests]
-        
+        # Delegate to the centralized attendance_requests route that already handles user_id/student_id resolution
+        from routes.attendance_requests import get_student_requests as _get_student_requests
+        resp = _get_student_requests(student_id)
+        # _get_student_requests returns a Flask Response (JSON list) — normalize to the wrapper this endpoint historically returned
+        data = resp.get_json()
+        if isinstance(data, list):
+            result = data
+        elif isinstance(data, dict) and 'requests' in data:
+            result = data['requests']
+        else:
+            result = data if data is not None else []
+
         conn.close()
-        
-        return jsonify({
-            'success': True,
-            'requests': result,
-            'count': len(result)
-        })
-        
+        return jsonify({'success': True, 'requests': result, 'count': len(result)})
+
     except Exception as e:
         conn.close()
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1204,8 +1206,6 @@ def get_teacher_attendance_requests(teacher_profile_id):
             SELECT 
                 ar.id,
                 ar.student_id,
-                ar.department,
-                ar.subject,
                 ar.request_date,
                 ar.reason,
                 ar.status,
@@ -1215,11 +1215,16 @@ def get_teacher_attendance_requests(teacher_profile_id):
                 u.email as student_email,
                 s.enrollment_no,
                 s.course as student_course,
-                s.semester
+                s.semester,
+                COALESCE(subj.name, c.class_name) as subject,
+                COALESCE(d.name, '') as department
             FROM attendance_requests ar
             JOIN students s ON ar.student_id = s.id
             JOIN users u ON s.user_id = u.id
-            WHERE ar.teacher_id = ?
+            JOIN classes c ON ar.class_id = c.id
+            LEFT JOIN subjects subj ON c.subject_id = subj.id
+            LEFT JOIN departments d ON subj.department_id = d.id
+            WHERE c.teacher_id = ?
             ORDER BY 
                 CASE WHEN ar.status = 'pending' THEN 1 ELSE 2 END,
                 ar.created_at DESC
@@ -1256,11 +1261,14 @@ def create_class_schedule():
             return jsonify({'success': False, 'error': 'No data provided'}), 400
         
         # Validate required fields
-        required_fields = ['teacher_id', 'department_id', 'subject_id', 'day_of_week', 'start_time', 'end_time', 'created_by']
-        missing_fields = []
-        for field in required_fields:
-            if field not in data or not data[field]:
-                missing_fields.append(field)
+        required_fields = [
+            'teacher_id', 
+            'department_id', 
+            'subject_id', 
+            'day_of_week', 
+            'start_time', 
+            'end_time', ]
+        missing_fields = [f for f in required_fields if f not in data]
         
         if missing_fields:
             return jsonify({

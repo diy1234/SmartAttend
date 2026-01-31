@@ -20,7 +20,7 @@ export default function AttendanceHistory() {
     const fetchSummary = async () => {
       setSummaryLoading(true);
       try {
-        const resp = await fetch("/api/admin/attendance/summary");
+        const resp = await fetch("http://127.0.0.1:5000/api/admin/attendance/summary");
         if (!resp.ok) throw new Error("Failed summary");
         const data = await resp.json();
         setSummary(data || {});

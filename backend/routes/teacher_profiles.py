@@ -67,7 +67,7 @@ def save_profile_picture(photo_data, user_id):
             return photo_data  # Store the full base64 data URL
             
         except Exception as e:
-            print(f"❌ Error processing profile picture: {str(e)}")
+            print(f"Error processing profile picture: {str(e)}")
             return ""
     
     # If it's already a file path or other format, return as is
@@ -86,30 +86,40 @@ def get_teacher_profile():
     try:
         # First, get the teacher profile using the numeric user_id
         cursor.execute('''
-            SELECT tp.*, u.email as user_email, u.name as user_name
+            SELECT tp.*, u.email as user_email, u.name as user_name, COALESCE(d.name, '') as department_name
             FROM teacher_profiles tp
             JOIN users u ON tp.user_id = u.id
+            LEFT JOIN departments d ON tp.department_id = d.id
             WHERE tp.user_id = ?
         ''', (user_id,))
         
         profile = cursor.fetchone()
         
         if profile:
-            # Convert social_links from JSON string to list
+            # Convert to dict and normalize fields expected by frontend
             profile_dict = dict(profile)
-            if profile_dict['social_links']:
+
+            # Provide human-friendly full_name and email from users table
+            profile_dict['full_name'] = profile_dict.get('user_name')
+            profile_dict['email'] = profile_dict.get('user_email')
+
+            # Provide department name (frontend expects department string)
+            profile_dict['department'] = profile_dict.get('department_name', '')
+
+            # Convert social_links from JSON string to list
+            if profile_dict.get('social_links'):
                 try:
                     profile_dict['social_links'] = json.loads(profile_dict['social_links'])
                 except:
                     profile_dict['social_links'] = []
             else:
                 profile_dict['social_links'] = []
-            
-            # Ensure photo field is properly handled
-            if not profile_dict['photo']:
+
+            # Ensure photo field is properly handled (may be NULL for older DBs)
+            if not profile_dict.get('photo'):
                 profile_dict['photo'] = ''
-                
-            print(f"✅ Retrieved profile for user_id: {user_id}")
+
+            print(f"Retrieved profile for user_id: {user_id}")
             return jsonify(profile_dict)
         else:
             # Generate faculty ID for new profile
@@ -142,11 +152,11 @@ def get_teacher_profile():
                 'updated_at': None
             }
             
-            print(f"⚠️ No profile found for user_id: {user_id}, returning empty template")
+            print(f"No profile found for user_id: {user_id}, returning empty template")
             return jsonify(empty_profile)
             
     except Exception as e:
-        print(f"❌ Error retrieving profile: {str(e)}")
+        print(f"Error retrieving profile: {str(e)}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -156,10 +166,10 @@ def save_teacher_profile():
     """Create or update teacher profile with photo handling"""
     data = request.get_json()
     
-    print(f"📥 Received profile data: {data}")  # Debug log
+    print(f"Received profile data: {data}")  # Debug log
     
     if not data or 'user_id' not in data:
-        print("❌ Missing user_id in request")
+        print("Missing user_id in request")
         return jsonify({'error': 'User ID is required'}), 400
     
     conn = get_db_connection()
@@ -169,9 +179,9 @@ def save_teacher_profile():
         # Validate user_id is a valid integer
         try:
             user_id = int(data['user_id'])
-            print(f"✅ User ID validated: {user_id} (type: {type(user_id).__name__})")
+            print(f"User ID validated: {user_id} (type: {type(user_id).__name__})")
         except (ValueError, TypeError) as e:
-            print(f"❌ Invalid user_id: {data['user_id']} - {str(e)}")
+            print(f"Invalid user_id: {data['user_id']} - {str(e)}")
             return jsonify({'error': 'User ID must be a valid integer'}), 400
         
         # Check if user exists and is a teacher
@@ -179,13 +189,13 @@ def save_teacher_profile():
         user = cursor.fetchone()
         
         if not user:
-            print(f"❌ User not found with ID: {user_id}")
+            print(f"User not found with ID: {user_id}")
             return jsonify({'error': 'User not found'}), 404
         
-        print(f"✅ User found: {user['name']} ({user['email']}) - Role: {user['role']}")
+        print(f"User found: {user['name']} ({user['email']}) - Role: {user['role']}")
         
         if user['role'] != 'teacher':
-            print(f"❌ User role is '{user['role']}', not 'teacher'")
+            print(f"User role is '{user['role']}', not 'teacher'")
             return jsonify({'error': 'User is not a teacher'}), 400
         
         # Process profile picture
@@ -200,7 +210,7 @@ def save_teacher_profile():
         cursor.execute('SELECT id, faculty_id FROM teacher_profiles WHERE user_id = ?', (user_id,))
         existing_profile = cursor.fetchone()
         
-        print(f"🔍 Existing profile check: {existing_profile}")
+        print(f"Existing profile check: {existing_profile}")
         
         faculty_id = data.get('faculty_id', '')
         department = data.get('department', '')
@@ -210,7 +220,7 @@ def save_teacher_profile():
             if existing_profile and existing_profile['faculty_id']:
                 # Keep existing faculty ID
                 faculty_id = existing_profile['faculty_id']
-                print(f"📌 Keeping existing faculty ID: {faculty_id}")
+                print(f"Keeping existing faculty ID: {faculty_id}")
             else:
                 # Generate new faculty ID
                 faculty_id = generate_faculty_id(department, user_id)
@@ -219,24 +229,39 @@ def save_teacher_profile():
         # Use user's name and email as defaults if not provided
         full_name = data.get('full_name', user['name'])
         email = data.get('email', user['email'])
-        
-        print(f"📝 Profile data to save: name={full_name}, email={email}, dept={department}")
-        
+
+        # Update the canonical user record for display name/email
+        cursor.execute('UPDATE users SET name = ?, email = ? WHERE id = ?', (full_name, email, user_id))
+
+        # Resolve department to department_id (accept either id or name)
+        department_value = data.get('department', '')
+        department_id = None
+        if department_value:
+            try:
+                department_id = int(department_value)
+            except (ValueError, TypeError):
+                cursor.execute('SELECT id FROM departments WHERE name = ?', (department_value,))
+                drow = cursor.fetchone()
+                if drow:
+                    department_id = drow['id']
+                else:
+                    # Create a new department if not found
+                    cursor.execute('INSERT INTO departments (name) VALUES (?)', (department_value,))
+                    department_id = cursor.lastrowid
+
+        print(f"Profile data to save: name={full_name}, email={email}, dept_id={department_id}")
+
         if existing_profile:
-            # Update existing profile
-            print(f"🔄 Updating existing profile (ID: {existing_profile['id']})")
+            # Update existing profile (do NOT write full_name/email into teacher_profiles)
+            print(f"Updating existing profile (ID: {existing_profile['id']})")
             cursor.execute('''
                 UPDATE teacher_profiles SET
-                    faculty_id = ?, full_name = ?, email = ?, department = ?,
-                    designation = ?, gender = ?, contact = ?, photo = ?,
-                    linkedin = ?, social_links = ?, professional = ?,
-                    headline = ?, about_text = ?, domain = ?, updated_at = CURRENT_TIMESTAMP
+                    faculty_id = ?, department_id = ?, designation = ?, gender = ?, contact = ?, photo = ?,
+                    linkedin = ?, social_links = ?, professional = ?, headline = ?, about_text = ?, domain = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
             ''', (
                 faculty_id,
-                full_name,
-                email,
-                department,
+                department_id,
                 data.get('designation', 'Assistant Professor'),
                 data.get('gender', 'Male'),
                 data.get('contact', ''),
@@ -251,22 +276,19 @@ def save_teacher_profile():
             ))
             action = "updated"
             profile_id = existing_profile['id']
-            print(f"✅ Update query executed")
+            print(f"Update query executed")
         else:
-            # Create new profile
-            print(f"➕ Creating new profile")
+            # Create new profile (store department_id, not department name)
+            print(f"Creating new profile")
             cursor.execute('''
                 INSERT INTO teacher_profiles (
-                    user_id, faculty_id, full_name, email, department,
-                    designation, gender, contact, photo, linkedin,
+                    user_id, faculty_id, department_id, designation, gender, contact, photo, linkedin,
                     social_links, professional, headline, about_text, domain
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 user_id,
                 faculty_id,
-                full_name,
-                email,
-                department,
+                department_id,
                 data.get('designation', 'Assistant Professor'),
                 data.get('gender', 'Male'),
                 data.get('contact', ''),
@@ -280,10 +302,10 @@ def save_teacher_profile():
             ))
             action = "created"
             profile_id = cursor.lastrowid
-            print(f"✅ Insert query executed, new profile ID: {profile_id}")
+            print(f"Insert query executed, new profile ID: {profile_id}")
         
         conn.commit()
-        print(f"✅ Profile {action} successfully for user_id: {user_id}, profile_id: {profile_id}")
+        print(f"Profile {action} successfully for user_id: {user_id}, profile_id: {profile_id}")
         
         response_data = {
             'message': f'Profile {action} successfully',
@@ -293,16 +315,22 @@ def save_teacher_profile():
             'action': action
         }
         
-        print(f"📤 Sending response: {response_data}")
+        print(f"Sending response: {response_data}")
         return jsonify(response_data), 200
         
     except Exception as e:
         conn.rollback()
-        error_msg = f'Database error: {str(e)}'
-        print(f"❌ Error saving profile: {error_msg}")
-        print(f"🔍 Full exception: {type(e).__name__}: {str(e)}")
+        # Provide clearer errors for common integrity problems (eg. duplicate email)
+        err_text = str(e)
+        if 'UNIQUE constraint failed' in err_text and 'users.email' in err_text:
+            error_msg = 'Email already in use by another account'
+            print(f"Error saving profile: {error_msg}")
+            return jsonify({'error': error_msg}), 400
+
+        error_msg = f'Database error: {err_text}'
+        print(f"Error saving profile: {error_msg}")
         import traceback
-        print(f"🔍 Traceback: {traceback.format_exc()}")
+        print(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': error_msg}), 500
     finally:
         conn.close()
@@ -433,13 +461,14 @@ def list_teacher_profiles():
     try:
         cursor.execute('''
             SELECT 
-                tp.id, tp.user_id, tp.faculty_id, tp.full_name, 
-                tp.email, tp.department, tp.designation,
+                tp.id, tp.user_id, tp.faculty_id, u.name AS full_name,
+                u.email AS email, COALESCE(d.name, '') AS department, tp.designation,
                 tp.photo, tp.updated_at,
                 u.name as user_name
             FROM teacher_profiles tp
             JOIN users u ON tp.user_id = u.id
-            ORDER BY tp.full_name
+            LEFT JOIN departments d ON tp.department_id = d.id
+            ORDER BY u.name
         ''')
         
         profiles = cursor.fetchall()

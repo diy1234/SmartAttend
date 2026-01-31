@@ -57,18 +57,28 @@ def admin_stats():
 def department_attendance():
     """
     Returns average attendance percentage grouped by department.
-    Now uses the `department` field from the attendance table directly.
+    Joins with departments table to show all departments even with 0 attendance.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT 
-            COALESCE(department, 'Unassigned') AS department,
-            ROUND(AVG(CASE WHEN status = 'present' THEN 100.0 ELSE 0 END), 1) AS percent
-        FROM attendance
-        GROUP BY department
-        HAVING COUNT(*) > 0
+          d.name AS department,
+          ROUND(
+            COALESCE(
+              (SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) * 100.0) /
+              NULLIF(COUNT(a.id), 0),
+              0
+            ),
+            1
+          ) AS percent
+        FROM departments d
+        LEFT JOIN subjects s ON s.department_id = d.id
+        LEFT JOIN classes c ON c.subject_id = s.id
+        LEFT JOIN attendance a ON a.class_id = c.id
+        GROUP BY d.id, d.name
+        ORDER BY d.name
     """)
 
     data = [{"department": dept, "percent": percent} for dept, percent in cursor.fetchall()]
@@ -195,27 +205,32 @@ def attendance_summary():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 1️⃣ Summary by Department
+    # 1️⃣ Summary by Department — derive department via class → subject → department
     cur.execute("""
         SELECT 
-            COALESCE(department, 'Unassigned') AS department,
+            COALESCE(d.name, 'Unassigned') AS department,
             COUNT(*) AS total_classes,
-            SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) AS present_classes,
-            SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) AS absent_classes
-        FROM attendance
-        GROUP BY department
+            SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present_classes,
+            SUM(CASE WHEN a.status='absent' THEN 1 ELSE 0 END) AS absent_classes
+        FROM attendance a
+        LEFT JOIN classes c ON a.class_id = c.id
+        LEFT JOIN subjects s ON c.subject_id = s.id
+        LEFT JOIN departments d ON s.department_id = d.id
+        GROUP BY d.name
     """)
     dept_rows = [dict(r) for r in cur.fetchall()]
 
-    # 2️⃣ Summary by Subject
+    # 2️⃣ Summary by Subject — derive subject from subject table or fallback to class_name
     cur.execute("""
         SELECT 
-            COALESCE(subject, 'Unassigned') AS subject,
+            COALESCE(s.name, c.class_name, 'Unassigned') AS subject,
             COUNT(*) AS total_classes,
-            SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) AS present_classes,
-            SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) AS absent_classes
-        FROM attendance
-        GROUP BY subject
+            SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present_classes,
+            SUM(CASE WHEN a.status='absent' THEN 1 ELSE 0 END) AS absent_classes
+        FROM attendance a
+        LEFT JOIN classes c ON a.class_id = c.id
+        LEFT JOIN subjects s ON c.subject_id = s.id
+        GROUP BY COALESCE(s.name, c.class_name)
     """)
     subject_rows = [dict(r) for r in cur.fetchall()]
 

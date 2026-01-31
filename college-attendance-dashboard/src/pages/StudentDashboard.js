@@ -195,6 +195,7 @@ export default function StudentDashboard() {
 
   const payload = {
     student_id: studentId,           // ✅ FIXED
+    class_id: requestForm.class_id,  // ✅ ADDED
     teacher_id: requestForm.teacher_id,
     department: requestForm.department,
     subject: requestForm.subject,

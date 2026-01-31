@@ -52,7 +52,7 @@ def debug_attendance_request():
     """Debug route to check attendance request data"""
     try:
         data = request.get_json()
-        print("📨 Received attendance request data:")
+        print("Received attendance request data:")
         print(f"   Data: {data}")
         print(f"   Headers: {dict(request.headers)}")
         
@@ -62,7 +62,7 @@ def debug_attendance_request():
             'message': 'Debug info printed in console'
         })
     except Exception as e:
-        print(f"❌ Error in debug route: {e}")
+        print(f"Error in debug route: {e}")
         return jsonify({'error': str(e)}), 500
 
 @debug_bp.route('/debug/attendance-requests', methods=['GET'])
@@ -76,9 +76,7 @@ def debug_attendance_requests():
             SELECT 
                 ar.id,
                 ar.student_id,
-                ar.teacher_id,
-                ar.department,
-                ar.subject,
+                ar.class_id,
                 ar.request_date,
                 ar.reason,
                 ar.status,
@@ -87,17 +85,23 @@ def debug_attendance_requests():
                 s.enrollment_no,
                 u.name as student_name,
                 u.email as student_email,
-                tp.full_name as teacher_name
+                COALESCE(subj.name, c.class_name) as subject,
+                COALESCE(d.name, '') as department,
+                tu.name as teacher_name
             FROM attendance_requests ar
             JOIN students s ON ar.student_id = s.id
             JOIN users u ON s.user_id = u.id
-            LEFT JOIN teacher_profiles tp ON ar.teacher_id = tp.id
+            LEFT JOIN classes c ON ar.class_id = c.id
+            LEFT JOIN subjects subj ON c.subject_id = subj.id
+            LEFT JOIN departments d ON subj.department_id = d.id
+            LEFT JOIN teacher_profiles tp ON c.teacher_id = tp.id
+            LEFT JOIN users tu ON tp.user_id = tu.id
             ORDER BY ar.created_at DESC
         ''')
         
         requests = cursor.fetchall()
         
-        cursor.execute('SELECT id, user_id, full_name FROM teacher_profiles')
+        cursor.execute('SELECT tp.id, tp.user_id, u.name as full_name FROM teacher_profiles tp JOIN users u ON tp.user_id = u.id')
         teachers = cursor.fetchall()
         
         cursor.execute('SELECT id, user_id, enrollment_no FROM students')

@@ -197,12 +197,12 @@ function convertTo24Hour(time) {
     try {
       // teacher
       let teacherObj = teachers.find(
-        (t) =>
-          t.email === newAssignment.teacher ||
-          t.user_email === newAssignment.teacher ||
-          t.id === newAssignment.teacher
+        (t) => t.email === newAssignment.teacher.trim()
       );
-      if (!teacherObj) return alert("Teacher not found");
+      
+      if (!teacherObj) {
+        return alert("Teacher not found. Please enter exact email from list.");
+      }
 
       // dept
       const deptObj = departments.find(
@@ -244,9 +244,11 @@ function convertTo24Hour(time) {
       startPart = convertTo24Hour(startPart);
       endPart = convertTo24Hour(endPart);
 
+      console.log("Selected teacher object:", teacherObj);
+
       // PAYLOAD INCLUDING ROOM NUMBER
       const payload = {
-        teacher_id: teacherObj.user_id || teacherObj.id,
+        teacher_id: teacherObj.id,
         department_id: departmentId,
         subject_id: subjectId,
         day_of_week: newScheduleDay,

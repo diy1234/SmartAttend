@@ -28,13 +28,13 @@ class EmailDomainParser:
             local_part = email.split('@')[0].lower()
             domain = email.split('@')[1].split('.')[0].lower()
             
-            print(f"🔍 EMAIL PARSER: Analyzing {email}, selected_role: {selected_role}")
+            print(f"EMAIL PARSER: Analyzing {email}, selected_role: {selected_role}")
             
             # ALWAYS respect the selected role from the form
             # Only use auto-detection if no role was provided
             if selected_role:
                 role = selected_role
-                print(f"🔍 Using selected role: {role}")
+                print(f"Using selected role: {role}")
             else:
                 # Auto-detect only if no role provided (fallback)
                 if 'teacher' in local_part or 'faculty' in local_part or 'prof' in local_part:
@@ -44,7 +44,7 @@ class EmailDomainParser:
                 else:
                     # Default based on common patterns
                     role = 'student'
-                print(f"🔍 Auto-detected role: {role}")
+                print(f"Auto-detected role: {role}")
             
             # Get domain-based department
             department = self.domain_mapping.get(domain, 'Computer Science')
@@ -72,11 +72,11 @@ class EmailDomainParser:
                     'department': course  # For students, department = course
                 }
             
-            print(f"🔍 EMAIL PARSER RESULT: {result}")
+            print(f"EMAIL PARSER RESULT: {result}")
             return result
                 
         except Exception as e:
-            print(f"❌ EMAIL PARSER ERROR: {e}")
+            print(f"EMAIL PARSER ERROR: {e}")
             # Default fallback that respects selected role
             if selected_role == 'teacher':
                 return {

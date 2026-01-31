@@ -266,7 +266,7 @@ def debug_all_users():
                 'role': user[3]
             })
         
-        print("🔍 DEBUG: All users in system:", users_list)
+        print("DEBUG: All users in system:", users_list)
         return jsonify({'users': users_list}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500

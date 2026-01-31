@@ -158,43 +158,23 @@ function AttendanceRequests() {
 
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [teacherProfileId, setTeacherProfileId] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
-
-  // Get teacher profile ID (teacher)
-  useEffect(() => {
-    const getTeacherProfileId = async () => {
-      if (user?.role === 'teacher' && user?.id) {
-        try {
-          const response = await fetch(`http://127.0.0.1:5000/api/teachers/profile-by-user/${user.id}`);
-          if (response.ok) {
-            const profileData = await response.json();
-            setTeacherProfileId(profileData.teacher_profile_id);
-          } else throw new Error('Could not get teacher profile');
-        } catch (error) {
-          console.error('Error fetching teacher profile:', error);
-          showToast('Failed to load teacher profile', 'error');
-        }
-      }
-    };
-    getTeacherProfileId();
-  }, [user, showToast]);
 
   // Fetch pending requests (teacher or admin)
   useEffect(() => {
     const fetchPending = async () => {
       if (!user) return;
       setLoading(true);
+
       try {
         let url = '';
 
         if (user.role === 'teacher') {
-          if (!teacherProfileId) { setLoading(false); return; }
-          url = `http://127.0.0.1:5000/api/attendance-requests/requests?teacher_id=${teacherProfileId}`;
+          // Send user.id directly — backend resolves teacher_profile
+          url = `http://127.0.0.1:5000/api/attendance-requests/requests?teacher_id=${user.id}`;
         } else if (user.role === 'admin') {
           url = `http://127.0.0.1:5000/api/attendance-requests/requests/admin/pending`;
         } else {
-          // students shouldn't use this page
           setRequests([]);
           setLoading(false);
           return;
@@ -202,9 +182,9 @@ function AttendanceRequests() {
 
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
         const data = await response.json();
-        // teacher endpoint returns array, admin endpoint also returns array
-        setRequests(Array.isArray(data) ? data : (data.requests || []));
+        setRequests(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Error fetching pending requests:', error);
         showToast('Failed to load pending requests', 'error');
@@ -215,16 +195,17 @@ function AttendanceRequests() {
     };
 
     fetchPending();
-  }, [user, teacherProfileId, showToast]);
+  }, [user, showToast]);
 
   const handleApprove = async (requestId) => {
     setActionLoading(requestId);
     try {
       let url = '';
       let body = null;
+
       if (user.role === 'teacher') {
         url = `http://127.0.0.1:5000/api/attendance-requests/requests/${requestId}/approve`;
-      } else { // admin
+      } else {
         url = `http://127.0.0.1:5000/api/attendance-requests/requests/admin/${requestId}/approve`;
         body = JSON.stringify({ admin_user_id: user.id });
       }
@@ -240,7 +221,6 @@ function AttendanceRequests() {
         throw new Error(err.error || 'Failed to approve');
       }
 
-      // remove request from pending list (since processed moved to history)
       setRequests(prev => prev.filter(r => r.id !== requestId));
       showToast('Request approved', 'success');
     } catch (e) {
@@ -256,6 +236,7 @@ function AttendanceRequests() {
     try {
       let url = '';
       let body = null;
+
       if (user.role === 'teacher') {
         url = `http://127.0.0.1:5000/api/attendance-requests/requests/${requestId}/reject`;
       } else {
@@ -299,7 +280,9 @@ function AttendanceRequests() {
     <div className="min-h-screen p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold">{user.role === 'admin' ? 'Pending Attendance Requests' : 'Student Attendance Requests'}</h1>
+          <h1 className="text-3xl font-bold">
+            {user.role === 'admin' ? 'Pending Attendance Requests' : 'Student Attendance Requests'}
+          </h1>
           <p className="text-gray-600 mt-2">{requests.length} pending</p>
         </div>
         <button onClick={() => navigate(-1)} className="bg-gray-700 text-white px-4 py-2 rounded">← Back</button>
@@ -317,20 +300,37 @@ function AttendanceRequests() {
               <div>
                 <h3 className="text-lg font-semibold">{req.student_name}</h3>
                 <div className="text-sm text-gray-500">Enrollment: {req.enrollment_no}</div>
+
                 <div className="mt-2 grid grid-cols-2 gap-4 text-sm">
-                  <div><div className="text-gray-500">Subject</div><div className="font-medium">{req.subject}</div></div>
-                  <div><div className="text-gray-500">Date</div><div className="font-medium">{new Date(req.request_date).toLocaleDateString()}</div></div>
+                  <div>
+                    <div className="text-gray-500">Subject</div>
+                    <div className="font-medium">{req.subject}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Date</div>
+                    <div className="font-medium">{new Date(req.request_date).toLocaleDateString()}</div>
+                  </div>
                 </div>
+
                 {req.reason && <div className="mt-3 bg-gray-50 p-3 rounded">{req.reason}</div>}
-                <div className="text-xs text-gray-400 mt-2">Submitted: {new Date(req.created_at).toLocaleString()}</div>
-                {user.role === 'admin' && <div className="text-sm text-gray-600 mt-1">Teacher: <b>{req.teacher_name}</b></div>}
+                <div className="text-xs text-gray-400 mt-2">
+                  Submitted: {new Date(req.created_at).toLocaleString()}
+                </div>
               </div>
 
               <div className="flex flex-col gap-2">
-                <button onClick={() => handleApprove(req.request_id || req.id)} disabled={actionLoading === req.id} className="bg-green-600 text-white px-4 py-2 rounded">
+                <button
+                  onClick={() => handleApprove(req.id)}
+                  disabled={actionLoading === req.id}
+                  className="bg-green-600 text-white px-4 py-2 rounded"
+                >
                   {actionLoading === req.id ? 'Processing...' : 'Approve'}
                 </button>
-                <button onClick={() => handleReject(req.request_id || req.id)} disabled={actionLoading === req.id} className="bg-red-600 text-white px-4 py-2 rounded">
+                <button
+                  onClick={() => handleReject(req.id)}
+                  disabled={actionLoading === req.id}
+                  className="bg-red-600 text-white px-4 py-2 rounded"
+                >
                   {actionLoading === req.id ? 'Processing...' : 'Reject'}
                 </button>
               </div>
@@ -338,9 +338,11 @@ function AttendanceRequests() {
           ))}
         </div>
       )}
-    <AttendanceHistoryInline userProp={user} />
+
+      <AttendanceHistoryInline userProp={user} />
     </div>
   );
 }
+
 
 export default AttendanceRequests;

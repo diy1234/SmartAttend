@@ -144,6 +144,30 @@ class NotificationService:
             conn.close()
 
     @staticmethod
+    def notify_all_teachers(title, message, notification_type="system", related_id=None):
+        """Notify all teachers by creating a notification per-teacher"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT DISTINCT u.id FROM users u WHERE u.role = 'teacher'")
+            teachers = cursor.fetchall()
+
+            for teacher in teachers:
+                NotificationService.create_notification(
+                    user_id=teacher['id'],
+                    title=title,
+                    message=message,
+                    notification_type=notification_type,
+                    related_id=related_id
+                )
+
+        except Exception as e:
+            print(f"Error notifying teachers: {e}")
+        finally:
+            conn.close()
+
+    @staticmethod
     def mark_notification_as_read(notification_id):
         """Mark a notification as read"""
         conn = get_db_connection()

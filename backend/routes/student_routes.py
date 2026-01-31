@@ -24,31 +24,48 @@ def dashboard(user_id):
     if not profile:
         return jsonify({"error": "Student not found"}), 404
 
-    # ---- Attendance Summary ----
+    # ---- Attendance Summary (by subject, derived from classes) ----
     cur.execute("""
-        SELECT subject,
-               COUNT(*) AS total_classes,
-               SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) AS present_classes
-        FROM attendance
-        WHERE student_id = ?
+        SELECT
+            COALESCE(subj.name, c.class_name) AS subject,
+            COUNT(*) AS total_classes,
+            SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present_classes
+        FROM attendance a
+        JOIN classes c ON a.class_id = c.id
+        LEFT JOIN subjects subj ON c.subject_id = subj.id
+        WHERE a.student_id = ?
         GROUP BY subject
     """, (profile["student_id"],))
     attendance_summary = [dict(r) for r in cur.fetchall()]
 
-    # ---- Leave / Attendance Requests ----
+    # ---- Leave / Attendance Requests (derive subject & department) ----
     cur.execute("""
-        SELECT id, subject, department, request_date, reason, status, created_at
-        FROM attendance_requests
-        WHERE student_id = ?
-        ORDER BY created_at DESC
+        SELECT
+            ar.id,
+            COALESCE(subj.name, c.class_name) AS subject,
+            COALESCE(d.name, '') AS department,
+            ar.request_date, ar.reason, ar.status, ar.created_at
+        FROM attendance_requests ar
+        LEFT JOIN classes c ON ar.class_id = c.id
+        LEFT JOIN subjects subj ON c.subject_id = subj.id
+        LEFT JOIN departments d ON subj.department_id = d.id
+        WHERE ar.student_id = ?
+        ORDER BY ar.created_at DESC
     """, (profile["student_id"],))
     leave_requests = [dict(r) for r in cur.fetchall()]
 
     # ---- Enrolled Classes ----
     cur.execute("""
-        SELECT class_id, subject, department
-        FROM enrollment
-        WHERE student_id = ?
+        SELECT e.class_id,
+               c.teacher_id,
+               COALESCE(s1.name, s2.name, c.class_name) AS subject,
+               COALESCE(d.name, '') AS department
+        FROM enrollment e
+        JOIN classes c ON e.class_id = c.id
+        LEFT JOIN subjects s1 ON e.subject_id = s1.id
+        LEFT JOIN subjects s2 ON c.subject_id = s2.id
+        LEFT JOIN departments d ON COALESCE(s1.department_id, s2.department_id) = d.id
+        WHERE e.student_id = ?
     """, (profile["student_id"],))
     classes = [dict(r) for r in cur.fetchall()]
 
@@ -71,9 +88,11 @@ def attendance_records(user_id):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT a.subject, a.attendance_date AS date, a.status
+        SELECT COALESCE(subj.name, c.class_name) AS subject, a.attendance_date AS date, a.status
         FROM attendance a
         JOIN students s ON a.student_id = s.id
+        JOIN classes c ON a.class_id = c.id
+        LEFT JOIN subjects subj ON c.subject_id = subj.id
         WHERE s.user_id = ?
         ORDER BY a.attendance_date DESC
     """, (user_id,))
@@ -92,10 +111,16 @@ def enrolled_classes(user_id):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT e.class_id, c.teacher_id, e.subject, e.department
+        SELECT e.class_id,
+               c.teacher_id,
+               COALESCE(s1.name, s2.name, c.class_name) AS subject,
+               COALESCE(d.name, '') AS department
         FROM enrollment e
         JOIN students s ON e.student_id = s.id
         JOIN classes c ON e.class_id = c.id
+        LEFT JOIN subjects s1 ON e.subject_id = s1.id
+        LEFT JOIN subjects s2 ON c.subject_id = s2.id
+        LEFT JOIN departments d ON COALESCE(s1.department_id, s2.department_id) = d.id
         WHERE s.user_id = ?
     """, (user_id,))
     classes = [dict(r) for r in cur.fetchall()]

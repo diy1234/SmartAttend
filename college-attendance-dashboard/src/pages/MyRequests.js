@@ -35,11 +35,10 @@ export default function MyRequests() {
 
       console.log("🔄 Fetching attendance requests for user ID:", userId);
       
-      // Try multiple endpoint variations
+      // Try multiple endpoint variations (use axios baseURL - don't include the `/api` prefix)
       const endpoints = [
-        `/api/attendance-requests/student/${userId}`,
+        `/attendance-requests/requests/student/${userId}`, // endpoint that returns list directly
         `/attendance-requests/student/${userId}`,
-        `/api/attendance-requests?student_id=${userId}`,
         `/attendance-requests?student_id=${userId}`
       ];
 
@@ -50,7 +49,8 @@ export default function MyRequests() {
         try {
           console.log(`   Trying endpoint: ${endpoint}`);
           response = await api.get(endpoint);
-          if (response.data && (response.data.requests || response.data.success)) {
+          // Accept array responses, or responses with `requests` or a `success` flag
+          if (response.data && (Array.isArray(response.data) || response.data.requests || response.data.success)) {
             successfulEndpoint = endpoint;
             console.log(`   ✅ Success with endpoint: ${endpoint}`);
             break;

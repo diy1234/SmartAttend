@@ -63,14 +63,16 @@ def get_teachers():
         SELECT 
             tp.id,
             tp.user_id,
-            tp.full_name,
-            tp.email,
-            tp.department,
+            u.name AS full_name,
+            u.email,
+            COALESCE(d.name, '') AS department,
             tp.designation,
             tp.gender,
             tp.contact,
             tp.linkedin
         FROM teacher_profiles tp
+        JOIN users u ON tp.user_id = u.id
+        LEFT JOIN departments d ON tp.department_id = d.id
         ORDER BY tp.id ASC
     """)
 

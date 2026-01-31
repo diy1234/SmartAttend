@@ -28,13 +28,16 @@ def assign_teacher_to_subject():
     
     try:
         # Validate teacher exists (teacher_profiles.id)
-        cursor.execute('SELECT user_id, full_name FROM teacher_profiles WHERE id = ?', (teacher_id,))
+        cursor.execute('SELECT user_id FROM teacher_profiles WHERE id = ?', (teacher_id,))
         teacher = cursor.fetchone()
         if not teacher:
             return jsonify({'error': 'Teacher not found'}), 404
         
         teacher_user_id = teacher['user_id']
-        teacher_name = teacher['full_name']
+        # Resolve human-readable name from users table
+        cursor.execute('SELECT name FROM users WHERE id = ?', (teacher_user_id,))
+        tuser = cursor.fetchone()
+        teacher_name = tuser['name'] if tuser else 'Teacher'
         
         # Validate subject exists
         cursor.execute('SELECT name FROM subjects WHERE id = ?', (subject_id,))
@@ -117,12 +120,13 @@ def get_teacher_subjects(teacher_id):
                 ts.department_id,
                 s.name as subject_name,
                 d.name as department_name,
-                tp.full_name as teacher_name,
+                u.name as teacher_name,
                 ts.created_at
             FROM teacher_subjects ts
             JOIN subjects s ON ts.subject_id = s.id
             JOIN departments d ON ts.department_id = d.id
             JOIN teacher_profiles tp ON ts.teacher_id = tp.id
+            JOIN users u ON tp.user_id = u.id
             WHERE ts.teacher_id = ?
             ORDER BY ts.created_at DESC
         ''', (teacher_id,))
@@ -183,13 +187,14 @@ def get_all_assignments():
                 ts.department_id,
                 s.name as subject_name,
                 d.name as department_name,
-                tp.full_name as teacher_name,
-                tp.email as teacher_email,
+                u.name as teacher_name,
+                u.email as teacher_email,
                 ts.created_at
             FROM teacher_subjects ts
             JOIN subjects s ON ts.subject_id = s.id
             JOIN departments d ON ts.department_id = d.id
             JOIN teacher_profiles tp ON ts.teacher_id = tp.id
+            JOIN users u ON tp.user_id = u.id
             ORDER BY ts.created_at DESC
         ''')
         

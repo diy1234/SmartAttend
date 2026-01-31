@@ -107,8 +107,9 @@ def get_student_attendance_percent():
                 COUNT(*) as total_classes
             FROM attendance a
             JOIN classes c ON a.class_id = c.id
+            LEFT JOIN subjects s ON c.subject_id = s.id
             WHERE a.student_id = ?
-              AND (c.class_name = ? OR a.subject = ?)
+              AND (c.class_name = ? OR s.name = ?)
         ''', (student_id, subject, subject))
         
         row = cursor.fetchone()
@@ -152,15 +153,18 @@ def get_student_attendance_stats():
         # Get attendance statistics grouped by department and subject
         cursor.execute('''
             SELECT 
-                a.department,
-                a.subject,
+                COALESCE(d.name, '') as department,
+                COALESCE(s.name, c.class_name) as subject,
                 COUNT(*) as total_classes,
                 SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as classes_attended,
                 ROUND(SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as attendance_percent
             FROM attendance a
+            JOIN classes c ON a.class_id = c.id
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
             WHERE a.student_id = ?
-            GROUP BY a.department, a.subject
-            ORDER BY a.department, a.subject
+            GROUP BY department, subject
+            ORDER BY department, subject
         ''', (student_id,))
         
         stats = [dict(row) for row in cursor.fetchall()]
@@ -250,41 +254,38 @@ def get_attendance_analytics():
         ''', (teacher_profile_id,))
         
         overall_stats = dict(cursor.fetchone())
-        print(f"📊 Analytics for teacher_profile_id {teacher_profile_id}: {overall_stats}")
+        print(f"Analytics for teacher_profile_id {teacher_profile_id}: {overall_stats}")
         
         # Get subject-wise statistics - FIXED: Use classes table
         cursor.execute(f'''
             SELECT 
-                COALESCE(
-                    (SELECT DISTINCT e.subject FROM enrollment e WHERE e.class_id = c.id LIMIT 1),
-                    c.class_name
-                ) as subject_name,
-                a.department as department_name,
+                COALESCE(s.name, c.class_name) as subject_name,
+                COALESCE(d.name, '') as department_name,
                 COUNT(*) as total,
                 SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present_count,
                 SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) as absent_count
             FROM attendance a
             JOIN classes c ON a.class_id = c.id
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
             WHERE c.teacher_id = ? {date_filter}
-            GROUP BY subject_name, a.department
+            GROUP BY subject_name, department_name
         ''', (teacher_profile_id,))
         
         subject_stats = [dict(row) for row in cursor.fetchall()]
-        print(f"📚 Subject-wise stats: {len(subject_stats)} subjects found")
+        print(f"Subject-wise stats: {len(subject_stats)} subjects found")
         
         # Get daily statistics - FIXED: Use classes table
         cursor.execute(f'''
             SELECT 
                 date(a.attendance_date) as date,
-                COALESCE(
-                    (SELECT DISTINCT e.subject FROM enrollment e WHERE e.class_id = c.id LIMIT 1),
-                    c.class_name
-                ) as subject_name,
+                COALESCE(s.name, c.class_name) as subject_name,
                 COUNT(*) as total,
                 SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present_count,
                 SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) as absent_count
             FROM attendance a
             JOIN classes c ON a.class_id = c.id
+            LEFT JOIN subjects s ON c.subject_id = s.id
             WHERE c.teacher_id = ? {date_filter}
             GROUP BY date(a.attendance_date), subject_name
             ORDER BY a.attendance_date DESC

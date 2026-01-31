@@ -168,19 +168,19 @@ export const getTeacherProfiles = () =>
 //  WEEKLY SCHEDULE
 // =====================================================
 export const listSchedules = (params) =>
-  api.get("/schedules/schedules", { params }).then((r) => r.data);
+  api.get("/schedules", { params }).then((r) => r.data);
 
 export const createSchedule = (data) =>
-  api.post("/schedules/schedules", data).then((r) => r.data);
+  api.post("/schedules", data).then((r) => r.data);
 
 export const updateSchedule = (id, data) =>
-  api.put(`/schedules/schedules/${id}`, data).then((r) => r.data);
+  api.put(`/schedules/${id}`, data).then((r) => r.data);
 
 export const deleteSchedule = (id) =>
-  api.delete(`/schedules/schedules/${id}`).then((r) => r.data);
+  api.delete(`/schedules/${id}`).then((r) => r.data);
 
 export const getScheduleForClass = (classId) =>
-  api.get(`/schedules/schedules/class/${classId}`).then((r) => r.data);
+  api.get(`/schedules/class/${classId}`).then((r) => r.data);
 
 // =====================================================
 //  DEFAULT EXPORT (old compatibility)

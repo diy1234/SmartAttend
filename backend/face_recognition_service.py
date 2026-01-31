@@ -31,18 +31,18 @@ class SimpleFaceRecognitionService:
                 if os.path.exists(path):
                     self.face_cascade = cv2.CascadeClassifier(path)
                     if not self.face_cascade.empty():
-                        print(f"✅ Loaded face cascade from: {path}")
+                        print(f"Loaded face cascade from: {path}")
                         return
             
             # If no cascade found, download it
-            print("⚠️ Downloading face cascade...")
+            print("Downloading face cascade...")
             import urllib.request
             url = 'https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml'
             urllib.request.urlretrieve(url, 'haarcascade_frontalface_default.xml')
             self.face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
             
         except Exception as e:
-            print(f"❌ Could not load face cascade: {e}")
+            print(f"Could not load face cascade: {e}")
 
     def load_known_faces(self):
         """Load known faces from database using user_id"""
@@ -51,10 +51,10 @@ class SimpleFaceRecognitionService:
         
         try:
             cursor.execute('''
-                SELECT fe.id, fe.user_id, fe.face_encoding, u.name, s.enrollment_no, s.id as student_id
+                SELECT fe.id, fe.student_id, fe.face_encoding, u.id AS user_id, u.name, s.enrollment_no
                 FROM face_encodings fe
-                JOIN users u ON fe.user_id = u.id
-                LEFT JOIN students s ON u.id = s.user_id
+                JOIN students s ON fe.student_id = s.id
+                JOIN users u ON s.user_id = u.id
             ''')
             
             face_data = cursor.fetchall()
@@ -67,16 +67,18 @@ class SimpleFaceRecognitionService:
                         'name': face['name'],
                         'enrollment_no': face['enrollment_no'],
                         'student_id': face['student_id'],
-                        'encoding': face_encoding
+                        'encoding': face_encoding,
+                        'user_id': face['user_id']
                     }
-                    print(f"✅ Loaded face for {face['name']} (User ID: {face['user_id']}, Student ID: {face['student_id']})")
+                    print(f"Loaded face for {face['name']} (User ID: {face['user_id']}, Student ID: {face['student_id']})")
                 except Exception as e:
-                    print(f"❌ Error loading face for user {face['user_id']}: {e}")
+                    uid = face['user_id'] if 'user_id' in face.keys() else '?'
+                    print(f"Error loading face for user {uid}: {e}")
                     
-            print(f"✅ Loaded {len(self.known_faces)} known faces from database")
+            print(f"Loaded {len(self.known_faces)} known faces from database")
             
         except Exception as e:
-            print(f"❌ Error loading known faces: {e}")
+            print(f"Error loading known faces: {e}")
         finally:
             conn.close()
 
@@ -93,7 +95,7 @@ class SimpleFaceRecognitionService:
             
             # Detect faces
             if self.face_cascade is None:
-                print("❌ Face cascade not loaded")
+                print("Face cascade not loaded")
                 return None
                 
             faces = self.face_cascade.detectMultiScale(
@@ -105,10 +107,10 @@ class SimpleFaceRecognitionService:
             )
             
             if len(faces) == 0:
-                print("❌ No faces detected")
+                print("No faces detected")
                 return None
             
-            print(f"✅ Detected {len(faces)} face(s)")
+            print(f"Detected {len(faces)} face(s)")
             
             # Use the largest face
             faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
@@ -150,17 +152,17 @@ class SimpleFaceRecognitionService:
             
             feature_vector = np.array(features, dtype=np.float32)
             
-            print(f"✅ Extracted {len(feature_vector)} features")
+            print(f"Extracted {len(feature_vector)} features")
             return feature_vector
             
         except Exception as e:
-            print(f"❌ Error extracting face features: {e}")
+            print(f"Error extracting face features: {e}")
             return None
 
     def register_face(self, user_id, image_data):
         """Register a new face for a user"""
         try:
-            print(f"🔍 Starting face registration for user {user_id}")
+            print(f"Starting face registration for user {user_id}")
             
             # Convert base64 image to numpy array
             if isinstance(image_data, str) and image_data.startswith('data:image'):
@@ -176,7 +178,7 @@ class SimpleFaceRecognitionService:
             else:
                 rgb_image = image_np
             
-            print("📸 Image loaded, detecting faces...")
+            print("Image loaded, detecting faces...")
             
             # Extract face features
             face_features = self.extract_face_features(rgb_image)
@@ -184,14 +186,21 @@ class SimpleFaceRecognitionService:
             if face_features is None:
                 return {'success': False, 'error': 'No face detected in image. Please ensure your face is clearly visible with good lighting.'}
             
-            print("✅ Face detected, extracting features...")
+            print("Face detected, extracting features...")
             
             # Save to database
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # Check if face already exists for this user
-            cursor.execute('SELECT id FROM face_encodings WHERE user_id = ?', (user_id,))
+            # Resolve user_id -> student_id (face_encodings table uses student_id)
+            cursor.execute('SELECT id FROM students WHERE user_id = ?', (user_id,))
+            student_row = cursor.fetchone()
+            if not student_row:
+                return {'success': False, 'error': 'No student profile found for this user_id. Please ensure you have a student profile before registering face.'}
+            student_id = student_row['id']
+            
+            # Check if face already exists for this student
+            cursor.execute('SELECT id FROM face_encodings WHERE student_id = ?', (student_id,))
             existing_face = cursor.fetchone()
             
             if existing_face:
@@ -199,18 +208,18 @@ class SimpleFaceRecognitionService:
                 cursor.execute('''
                     UPDATE face_encodings 
                     SET face_encoding = ?, created_at = CURRENT_TIMESTAMP
-                    WHERE user_id = ?
-                ''', (pickle.dumps(face_features), user_id))
+                    WHERE student_id = ?
+                ''', (pickle.dumps(face_features), student_id))
                 action = "updated"
-                print(f"🔄 Updated existing face encoding for user {user_id}")
+                print(f"Updated existing face encoding for student {student_id} (user {user_id})")
             else:
                 # Insert new face encoding
                 cursor.execute('''
-                    INSERT INTO face_encodings (user_id, face_encoding)
+                    INSERT INTO face_encodings (student_id, face_encoding)
                     VALUES (?, ?)
-                ''', (user_id, pickle.dumps(face_features)))
+                ''', (student_id, pickle.dumps(face_features)))
                 action = "registered"
-                print(f"✅ Registered new face encoding for user {user_id}")
+                print(f"Registered new face encoding for student {student_id} (user {user_id})")
             
             conn.commit()
             conn.close()
@@ -225,7 +234,7 @@ class SimpleFaceRecognitionService:
             }
             
         except Exception as e:
-            print(f"❌ Error in face registration: {e}")
+            print(f"Error in face registration: {e}")
             return {'success': False, 'error': f'Registration failed: {str(e)}'}
 
     def compare_faces(self, features1, features2):
@@ -254,7 +263,7 @@ class SimpleFaceRecognitionService:
     def recognize_faces(self, image_data):
         """Recognize faces in an image using user_id"""
         try:
-            print("🔍 Starting face recognition...")
+            print("Starting face recognition...")
             
             # Convert base64 image to numpy array
             if isinstance(image_data, str) and image_data.startswith('data:image'):
@@ -281,7 +290,7 @@ class SimpleFaceRecognitionService:
                     'message': 'No face detected in image'
                 }
             
-            print("✅ Face detected, starting recognition...")
+            print("Face detected, starting recognition...")
             
             recognized_faces = []
             
@@ -303,7 +312,7 @@ class SimpleFaceRecognitionService:
                 # Convert distance to confidence (0-1 scale)
                 confidence = max(0, 1 - (distance / 2000.0))
                 
-                print(f"  📊 Comparing with {face_data['name']}: distance={distance:.2f}, confidence={confidence:.2f}")
+                print(f"  Comparing with {face_data['name']}: distance={distance:.2f}, confidence={confidence:.2f}")
                 
                 if distance < best_distance:
                     best_distance = distance
@@ -328,9 +337,9 @@ class SimpleFaceRecognitionService:
                     'distance': float(best_match['distance'])
                 }
                 recognized_faces.append(recognized_face)
-                print(f"✅ Recognized: {best_match['name']} (User ID: {best_match['user_id']}, Confidence: {best_match['confidence']:.2f})")
+                print(f"Recognized: {best_match['name']} (User ID: {best_match['user_id']}, Confidence: {best_match['confidence']:.2f})")
             else:
-                print(f"❌ No confident match found. Best match: {best_match['name'] if best_match else 'None'} (Confidence: {best_match['confidence'] if best_match else 0:.2f})")
+                print(f"No confident match found. Best match: {best_match['name'] if best_match else 'None'} (Confidence: {best_match['confidence'] if best_match else 0:.2f})")
 
             # Prepare response with JSON serializable data
             response_data = {
@@ -347,13 +356,13 @@ class SimpleFaceRecognitionService:
                 } if best_match else None
             }
             
-            print(f"✅ Recognition completed. Returning {len(recognized_faces)} recognized faces")
+            print(f"Recognition completed. Returning {len(recognized_faces)} recognized faces")
             return response_data
             
         except Exception as e:
-            print(f"❌ Error in face recognition: {e}")
+            print(f"Error in face recognition: {e}")
             import traceback
-            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            print(f"Full traceback: {traceback.format_exc()}")
             return {
                 'success': False, 
                 'error': str(e),
@@ -383,7 +392,7 @@ class SimpleFaceRecognitionService:
 
     def debug_face_mappings(self):
         """Debug method to check current face mappings"""
-        print("🔍 DEBUG: Current Face Mappings")
+        print("DEBUG: Current Face Mappings")
         for user_id, face_data in self.known_faces.items():
             print(f"  User ID: {user_id} -> Name: {face_data['name']}, Student ID: {face_data['student_id']}, Enrollment: {face_data['enrollment_no']}")
 

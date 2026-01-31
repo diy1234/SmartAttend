@@ -244,8 +244,10 @@ def update_schedule(schedule_id):
     finally:
         conn.close()
 
-@class_schedules_bp.route('/schedules/<int:schedule_id>', methods=['DELETE'])
+@class_schedules_bp.route('/<int:schedule_id>', methods=['DELETE', 'OPTIONS'])
 def delete_schedule(schedule_id):
+    if request.method == 'OPTIONS':
+        return '', 200  # allow CORS preflight
     """Delete a class schedule (Admin only)"""
     conn = get_db_connection()
     cursor = conn.cursor()

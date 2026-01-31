@@ -33,46 +33,26 @@ def get_teacher_courses():
             SELECT 
                 c.id as id,
                 c.class_name,
-                c.subject_code,
-                c.schedule,
+                COALESCE(s.name, c.class_name) as subject,
                 -- Get the primary course from enrolled students
                 COALESCE(
-                    (SELECT DISTINCT s.course 
+                    (SELECT DISTINCT st.course 
                      FROM enrollment e 
-                     JOIN students s ON e.student_id = s.id 
+                     JOIN students st ON e.student_id = st.id 
                      WHERE e.class_id = c.id 
                      LIMIT 1),
                     'General'
                 ) as course,
-                -- Get the primary subject from enrollments
-                COALESCE(
-                    (SELECT DISTINCT e.subject 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    c.class_name
-                ) as subject,
-                -- Get department
-                COALESCE(
-                    (SELECT DISTINCT e.department 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    'Computer Science'
-                ) as department,
+                -- Get department from enrollments or subject mapping
+                COALESCE(d.name, 'Computer Science') as department,
                 COUNT(DISTINCT e.student_id) as student_count,
-                -- Get room from class_schedules if available
-                COALESCE(
-                    (SELECT cs.room_number 
-                     FROM class_schedules cs 
-                     WHERE cs.teacher_id = c.teacher_id 
-                     LIMIT 1),
-                    'TBA'
-                ) as room
+                COALESCE(c.room, 'TBA') as room
             FROM classes c
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
             LEFT JOIN enrollment e ON c.id = e.class_id
             WHERE c.teacher_id = ?
-            GROUP BY c.id, c.class_name, c.subject_code, c.schedule
+            GROUP BY c.id, c.class_name, s.name, c.room
             ORDER BY c.class_name
         ''', (teacher_profile_id,))
         
@@ -93,8 +73,8 @@ def get_teacher_courses():
                 'class_name': cls['class_name'],
                 'course': cls['course'],  # BCA, BBA, MBA, etc.
                 'subject': cls['subject'],  # Data Structures, Principles of Management, etc.
-                'subject_code': cls['subject_code'],
-                'schedule': cls['schedule'] or 'Not scheduled',
+                'subject_code': '',
+                'schedule': 'Not scheduled',
                 'department': cls['department'],
                 'room': cls['room'],
                 'student_count': cls['student_count']
@@ -150,11 +130,12 @@ def get_teacher_stats():
         ''', (teacher_profile_id,))
         student_count = cursor.fetchone()['student_count']
         
-        # Get pending attendance requests
+        # Get pending attendance requests (join with classes to find teacher)
         cursor.execute('''
             SELECT COUNT(*) as pending_requests
-            FROM attendance_requests 
-            WHERE teacher_id = ? AND status = 'pending'
+            FROM attendance_requests ar
+            JOIN classes c ON ar.class_id = c.id
+            WHERE c.teacher_id = ? AND ar.status = 'pending'
         ''', (teacher_profile_id,))
         pending_requests = cursor.fetchone()['pending_requests']
         
@@ -182,34 +163,22 @@ def get_course_students(class_id):
             SELECT 
                 c.id,
                 c.class_name,
-                c.subject_code,
+                COALESCE(s.name, c.class_name) as subject,
                 c.teacher_id,
                 -- Get course from enrolled students
                 COALESCE(
-                    (SELECT DISTINCT s.course 
+                    (SELECT DISTINCT st.course 
                      FROM enrollment e 
-                     JOIN students s ON e.student_id = s.id 
+                     JOIN students st ON e.student_id = st.id 
                      WHERE e.class_id = c.id 
                      LIMIT 1),
                     'General'
                 ) as course,
-                -- Get subject from enrollments
-                COALESCE(
-                    (SELECT DISTINCT e.subject 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    c.class_name
-                ) as subject,
-                -- Get department
-                COALESCE(
-                    (SELECT DISTINCT e.department 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    'Computer Science'
-                ) as department
+                -- Get department via subject mapping
+                COALESCE(d.name, 'Computer Science') as department
             FROM classes c
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
             WHERE c.id = ?
         ''', (class_id,))
         
@@ -221,13 +190,13 @@ def get_course_students(class_id):
         
         # Get teacher name
         cursor.execute('''
-            SELECT tp.full_name, u.name
+            SELECT u.name
             FROM teacher_profiles tp
             JOIN users u ON tp.user_id = u.id
             WHERE tp.id = ?
         ''', (course['teacher_id'],))
         teacher = cursor.fetchone()
-        teacher_name = teacher['full_name'] if teacher and teacher['full_name'] else teacher['name'] if teacher else 'Unknown Teacher'
+        teacher_name = teacher['name'] if teacher else 'Unknown Teacher'
         
         # Get students enrolled in this class
         cursor.execute('''
@@ -275,7 +244,7 @@ def get_course_students(class_id):
         
         conn.close()
         
-        print(f"📋 Returning {len(formatted_students)} students for class {class_id}")
+        print(f"Returning {len(formatted_students)} students for class {class_id}")
         
         return jsonify({
             'course': {
@@ -283,7 +252,7 @@ def get_course_students(class_id):
                 'class_name': course['class_name'],
                 'course': course['course'],  # BCA, BBA, MBA, etc.
                 'subject': course['subject'],  # Data Structures, Principles of Management, etc.
-                'subject_code': course['subject_code'],
+                'subject_code': '',
                 'department': course['department'],
                 'teacher_name': teacher_name
             },
@@ -308,7 +277,6 @@ def get_course_attendance(class_id):
         cursor.execute('''
             SELECT 
                 c.class_name,
-                c.subject_code,
                 c.teacher_id,
                 COALESCE(
                     (SELECT DISTINCT s.course 
@@ -318,14 +286,9 @@ def get_course_attendance(class_id):
                      LIMIT 1),
                     'General'
                 ) as course,
-                COALESCE(
-                    (SELECT DISTINCT e.subject 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    c.class_name
-                ) as subject
+                COALESCE(subj.name, c.class_name) as subject
             FROM classes c
+            LEFT JOIN subjects subj ON c.subject_id = subj.id
             WHERE c.id = ?
         ''', (class_id,))
         
@@ -336,13 +299,13 @@ def get_course_attendance(class_id):
         
         # Get teacher name
         cursor.execute('''
-            SELECT tp.full_name, u.name
+            SELECT u.name
             FROM teacher_profiles tp
             JOIN users u ON tp.user_id = u.id
             WHERE tp.id = ?
         ''', (course['teacher_id'],))
         teacher = cursor.fetchone()
-        teacher_name = teacher['full_name'] if teacher and teacher['full_name'] else teacher['name'] if teacher else 'Unknown Teacher'
+        teacher_name = teacher['name'] if teacher else 'Unknown Teacher'
         
         # Build attendance query
         query = '''
@@ -397,7 +360,7 @@ def get_course_attendance(class_id):
                 'name': course['class_name'],
                 'course': course['course'],
                 'subject': course['subject'],
-                'subject_code': course['subject_code'],
+                'subject_code': '',
                 'teacher_name': teacher_name
             },
             'attendance': formatted_attendance,
@@ -444,8 +407,8 @@ def mark_attendance():
         # Get class details with course and subject info
         cursor.execute('''
             SELECT 
+                c.id,
                 c.class_name,
-                c.subject_code,
                 COALESCE(
                     (SELECT DISTINCT s.course 
                      FROM enrollment e 
@@ -454,21 +417,12 @@ def mark_attendance():
                      LIMIT 1),
                     'General'
                 ) as course,
-                COALESCE(
-                    (SELECT DISTINCT e.subject 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    c.class_name
-                ) as subject,
-                COALESCE(
-                    (SELECT DISTINCT e.department 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    'Computer Science'
-                ) as department
+                COALESCE(s.name, c.class_name) as subject,
+                COALESCE(d.name, 'Computer Science') as department,
+                COALESCE(c.room, 'TBA') as room
             FROM classes c
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
             WHERE c.id = ?
         ''', (class_id,))
         
@@ -488,6 +442,7 @@ def mark_attendance():
         success_count = 0
         errors = []
         global_method = data.get('method', 'manual')  # Default to 'manual' for teacher marks
+        response_absent_msg = ''
         
         for record in attendance_data:
             student_id = record.get('student_id')
@@ -511,9 +466,9 @@ def mark_attendance():
                 # Append a new attendance record for this action to preserve history
                 cursor.execute('''
                     INSERT INTO attendance 
-                    (student_id, class_id, attendance_date, status, marked_by, method, subject, department, course)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (student_id, class_id, attendance_date, status, teacher_user_id, method, subject, department, course))
+                    (student_id, class_id, attendance_date, status, marked_by, method)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (student_id, class_id, attendance_date, status, teacher_user_id, method))
                 print(f"Appended attendance record for student {student_id}")
 
                 success_count += 1
@@ -550,12 +505,9 @@ def mark_attendance():
                 if not existing:
                     cursor.execute('''
                         INSERT INTO attendance
-                        (student_id, class_id, attendance_date, status, marked_by, method, subject, department, course)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (sid, class_id, attendance_date, 'absent', teacher_user_id, 'manual', subject, department, course))
-                    absent_count += 1
-                    print(f"Marked absent (not recognized/marked) for student {sid}")
-
+                        (student_id, class_id, attendance_date, status, marked_by, method)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (sid, class_id, attendance_date, 'absent', teacher_user_id, 'manual'))
             # Include absent_count in response
             if absent_count > 0:
                 response_absent_msg = f' and marked {absent_count} student(s) absent'
@@ -598,8 +550,8 @@ def get_attendance_summary(class_id):
         # Get course details with course and subject info
         cursor.execute('''
             SELECT 
+                c.id,
                 c.class_name,
-                c.subject_code,
                 c.teacher_id,
                 COALESCE(
                     (SELECT DISTINCT s.course 
@@ -609,14 +561,9 @@ def get_attendance_summary(class_id):
                      LIMIT 1),
                     'General'
                 ) as course,
-                COALESCE(
-                    (SELECT DISTINCT e.subject 
-                     FROM enrollment e 
-                     WHERE e.class_id = c.id 
-                     LIMIT 1),
-                    c.class_name
-                ) as subject
+                COALESCE(s.name, c.class_name) as subject
             FROM classes c
+            LEFT JOIN subjects s ON c.subject_id = s.id
             WHERE c.id = ?
         ''', (class_id,))
         
@@ -627,13 +574,13 @@ def get_attendance_summary(class_id):
         
         # Get teacher name
         cursor.execute('''
-            SELECT tp.full_name, u.name
+            SELECT u.name
             FROM teacher_profiles tp
             JOIN users u ON tp.user_id = u.id
             WHERE tp.id = ?
         ''', (course['teacher_id'],))
         teacher = cursor.fetchone()
-        teacher_name = teacher['full_name'] if teacher and teacher['full_name'] else teacher['name'] if teacher else 'Unknown Teacher'
+        teacher_name = teacher['name'] if teacher else 'Unknown Teacher'
         
         # Get total classes conducted
         cursor.execute('''
@@ -683,7 +630,7 @@ def get_attendance_summary(class_id):
                 'name': course['class_name'],
                 'course': course['course'],
                 'subject': course['subject'],
-                'subject_code': course['subject_code'],
+                'subject_code': '',
                 'teacher_name': teacher_name
             },
             'total_classes': total_classes,
@@ -736,13 +683,14 @@ def get_weekly_schedule():
                 cs.day_of_week as day,
                 cs.start_time,
                 cs.end_time,
-                cs.room_number as room,
-                s.name as subject,
-                d.name as department
+                COALESCE(c.room, 'TBA') as room,
+                COALESCE(s.name, '') as subject,
+                COALESCE(d.name, '') as department
             FROM class_schedules cs
-            JOIN subjects s ON cs.subject_id = s.id
-            JOIN departments d ON cs.department_id = d.id
-            WHERE cs.teacher_id = ?
+            JOIN classes c ON cs.class_id = c.id
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
+            WHERE c.teacher_id = ?
             ORDER BY 
                 CASE cs.day_of_week
                     WHEN 'Monday' THEN 1
@@ -774,29 +722,26 @@ def get_weekly_schedule():
         # Also get classes without specific schedules
         cursor.execute('''
             SELECT 
+                c.id as id,
                 c.class_name as subject,
-                c.schedule,
-                c.subject_code
+                COALESCE(c.room, 'TBA') as room
             FROM classes c
             WHERE c.teacher_id = ?
             AND NOT EXISTS (
                 SELECT 1 FROM class_schedules cs 
-                WHERE cs.teacher_id = c.teacher_id 
-                AND cs.subject_id IN (SELECT id FROM subjects WHERE name LIKE '%' || c.class_name || '%')
+                WHERE cs.class_id = c.id
             )
         ''', (teacher_profile_id,))
         
         unscheduled_classes = cursor.fetchall()
         
         for cls in unscheduled_classes:
-            # Parse schedule from class data if available
-            schedule_parts = cls['schedule'].split(' - ') if cls['schedule'] else ['Not Scheduled', '']
             formatted_schedule.append({
-                'id': f"class_{cls['subject_code']}",
-                'day': schedule_parts[0] if schedule_parts else 'Not Scheduled',
-                'time': schedule_parts[1] if len(schedule_parts) > 1 else 'TBA',
+                'id': f"class_{cls['id']}",
+                'day': 'Not Scheduled',
+                'time': 'TBA',
                 'subject': cls['subject'],
-                'room': 'TBA',
+                'room': cls['room'],
                 'department': 'Computer Science',
                 'dept': 'Computer Science'
             })
@@ -834,7 +779,7 @@ def get_pending_requests():
         
         teacher_profile_id = teacher_profile['id']
         
-        # Get pending attendance requests
+        # Get pending attendance requests (join with classes to find teacher)
         cursor.execute('''
             SELECT 
                 ar.id,
@@ -844,12 +789,15 @@ def get_pending_requests():
                 ar.created_at,
                 u.name as student_name,
                 st.enrollment_no,
-                ar.department,
-                ar.subject
+                COALESCE(s.name, c.class_name) as subject,
+                COALESCE(d.name, '') as department
             FROM attendance_requests ar
+            JOIN classes c ON ar.class_id = c.id
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            LEFT JOIN departments d ON s.department_id = d.id
             JOIN students st ON ar.student_id = st.id
             JOIN users u ON st.user_id = u.id
-            WHERE ar.teacher_id = ? AND ar.status = 'pending'
+            WHERE c.teacher_id = ? AND ar.status = 'pending'
             ORDER BY ar.created_at DESC
         ''', (teacher_profile_id,))
         
@@ -907,8 +855,13 @@ def update_request_status():
         
         teacher_profile_id = teacher_profile['id']
         
-        # Verify the request belongs to this teacher
-        cursor.execute('SELECT id FROM attendance_requests WHERE id = ? AND teacher_id = ?', (request_id, teacher_profile_id))
+        # Verify the request belongs to this teacher (attendance_requests links to class)
+        cursor.execute('''
+            SELECT ar.id
+            FROM attendance_requests ar
+            JOIN classes c ON ar.class_id = c.id
+            WHERE ar.id = ? AND c.teacher_id = ?
+        ''', (request_id, teacher_profile_id))
         request_record = cursor.fetchone()
         
         if not request_record:
@@ -955,11 +908,12 @@ def get_pending_requests_count():
         
         teacher_profile_id = teacher_profile['id']
         
-        # Get count of pending requests
+        # Get count of pending requests (join with classes to find teacher)
         cursor.execute('''
             SELECT COUNT(*) as pending_count 
-            FROM attendance_requests 
-            WHERE teacher_id = ? AND status = 'pending'
+            FROM attendance_requests ar
+            JOIN classes c ON ar.class_id = c.id
+            WHERE c.teacher_id = ? AND ar.status = 'pending'
         ''', (teacher_profile_id,))
         
         result = cursor.fetchone()

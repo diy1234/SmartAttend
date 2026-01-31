@@ -55,11 +55,12 @@ def get_profile():
     
     elif user['role'] == 'teacher':
         cursor.execute('''
-            SELECT faculty_id, full_name, department, designation, gender,
-                   contact, photo, linkedin, social_links, professional,
-                   headline, about_text, domain
-            FROM teacher_profiles 
-            WHERE user_id = ?
+            SELECT tp.faculty_id, tp.designation, tp.gender,
+                   tp.contact, tp.photo, tp.linkedin, tp.social_links, tp.professional,
+                   tp.headline, tp.about_text, tp.domain, COALESCE(d.name, '') AS department
+            FROM teacher_profiles tp
+            LEFT JOIN departments d ON tp.department_id = d.id
+            WHERE tp.user_id = ?
         ''', (user_id,))
         teacher_profile = cursor.fetchone()
         if teacher_profile:
@@ -119,11 +120,12 @@ def get_teacher_profile():
     
     cursor.execute('''
         SELECT u.id, u.name, u.email, u.role, u.created_at,
-               tp.faculty_id, tp.full_name, tp.department, tp.designation, 
+               tp.faculty_id, COALESCE(d.name,'') AS department, tp.designation, 
                tp.gender, tp.contact, tp.photo, tp.linkedin, tp.social_links,
                tp.professional, tp.headline, tp.about_text, tp.domain
         FROM users u
         JOIN teacher_profiles tp ON u.id = tp.user_id
+        LEFT JOIN departments d ON tp.department_id = d.id
         WHERE u.id = ? AND u.role = 'teacher'
     ''', (teacher_id,))
     
@@ -197,12 +199,34 @@ def update_profile():
                 )
         
         elif role == 'teacher':
+            # Handle 'full_name' -> users.name
+            if 'full_name' in data:
+                cursor.execute('UPDATE users SET name = ? WHERE id = ?', (data['full_name'], user_id))
+
+            # Handle department: accept name or id
+            if 'department' in data:
+                dept = data['department']
+                dept_id = None
+                try:
+                    dept_id = int(dept)
+                except Exception:
+                    # look up by name, create if missing
+                    cursor.execute('SELECT id FROM departments WHERE name = ?', (dept,))
+                    drow = cursor.fetchone()
+                    if drow:
+                        dept_id = drow['id']
+                    else:
+                        cursor.execute('INSERT INTO departments (name) VALUES (?)', (dept,))
+                        dept_id = cursor.lastrowid
+
+                cursor.execute('UPDATE teacher_profiles SET department_id = ? WHERE user_id = ?', (dept_id, user_id))
+
+            # Update remaining teacher profile fields
             update_fields = []
             update_values = []
             
-            teacher_fields = ['full_name', 'department', 'designation', 'gender',
-                            'contact', 'linkedin', 'social_links', 'professional',
-                            'headline', 'about_text', 'domain']
+            teacher_fields = ['designation', 'gender', 'contact', 'linkedin', 'social_links', 'professional',
+                            'headline', 'about_text', 'domain', 'photo']
             
             for field in teacher_fields:
                 if field in data:
@@ -254,9 +278,10 @@ def get_all_teachers():
     
     cursor.execute('''
         SELECT u.id, u.name, u.email, u.created_at,
-               tp.faculty_id, tp.department, tp.designation, tp.contact
+               tp.faculty_id, COALESCE(d.name, '') AS department, tp.designation, tp.contact
         FROM users u
         JOIN teacher_profiles tp ON u.id = tp.user_id
+        LEFT JOIN departments d ON tp.department_id = d.id
         WHERE u.role = 'teacher'
         ORDER BY u.name
     ''')
