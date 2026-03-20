@@ -1,4 +1,4 @@
-# SmartAttend — AI-Powered Attendance Management System 🎓
+# SmartAttend — AI-Powered Attendance Management System 
 
 SmartAttend is a web-based, AI-powered attendance management system designed to automate and modernize attendance tracking in academic institutions. By integrating **facial recognition technology**, the system ensures **accurate, secure, and proxy-free** attendance marking, replacing traditional manual methods with a reliable digital solution.
 
