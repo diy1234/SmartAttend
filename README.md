@@ -4,7 +4,8 @@ SmartAttend is a web-based, AI-powered attendance management system designed to 
 
 ---
 
-## Key Features
+## Key Features most important part of smatr attend
+
 
 * Face registration and facial recognition based attendance
 * Proxy-free, secure attendance marking
